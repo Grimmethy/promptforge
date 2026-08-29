@@ -202,27 +202,26 @@ function buildEditorTools() {
     el('span', { class: 'muted', style: 'font-size:10px;align-self:center' }, 'drag a joint to pose · hands/feet use IK'),
   ]));
   editor.rigs.forEach((r, fi) => {
-    const rows = [
-      el('div', { class: 'row' }, [
-        el('span', { class: 'muted', style: 'font-size:10px;flex:1' }, editor.rigs.length > 1 ? (fi === 0 ? 'Figure A' : 'Figure B') : 'Bone lengths'),
-        el('button', { class: 'small', onclick: () => editor.mirror(fi) }, '⇋ mirror'),
-      ]),
-      el('div', { class: 'lenrow' }, [
-        el('label', {}, 'overall'),
-        el('input', { type: 'range', min: 0.6, max: 1.5, step: 0.02, value: 1, onchange: e => { editor.scaleRig(fi, +e.target.value); e.target.value = 1; } }),
-      ]),
-    ];
-    for (const key of RIG.lengthKeys) {
+    const head = el('div', { class: 'row' }, [
+      el('span', { class: 'muted', style: 'font-size:10px;flex:1' }, editor.rigs.length > 1 ? (fi === 0 ? 'Figure A' : 'Figure B') : 'Figure'),
+      el('button', { class: 'small', onclick: () => editor.scaleRig(fi, 1.06) }, 'grow'),
+      el('button', { class: 'small', onclick: () => editor.scaleRig(fi, 0.94) }, 'shrink'),
+      el('button', { class: 'small', onclick: () => editor.mirror(fi) }, '⇋ mirror'),
+    ]);
+    const lenRows = RIG.lengthKeys.map(key => {
       const [lo, hi] = RIG.range[key];
-      rows.push(el('div', { class: 'lenrow' }, [
+      return el('div', { class: 'lenrow' }, [
         el('label', {}, RIG.bonePretty[key]),
         el('input', {
           type: 'range', min: lo, max: hi, step: 0.005, value: r.lengths[key],
           oninput: e => editor.setLength(fi, key, +e.target.value),
         }),
-      ]));
-    }
-    wrap.append(el('div', { class: 'fig' }, rows));
+      ]);
+    });
+    const lens = el('details', { class: 'lens' }, [
+      el('summary', {}, 'bone lengths'), ...lenRows,
+    ]);
+    wrap.append(el('div', { class: 'fig' }, [head, lens]));
   });
 }
 

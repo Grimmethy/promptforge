@@ -77,6 +77,8 @@ details.presetEd textarea.yaml { width: 100%; margin: 6px 0; font: 11px/1.4 ui-m
 #editorWrap canvas:active { cursor: grabbing; }
 .fig .lenrow { display: grid; grid-template-columns: 62px 1fr; gap: 6px; align-items: center; }
 .fig .lenrow label { margin: 2px 0; }
+.fig details.lens { margin: 6px 0 0; padding: 4px 7px; background: var(--bg); }
+.fig details.lens[open] { padding-bottom: 7px; }
 #editorTools { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 #editorTools .undoredo { display: flex; gap: 5px; }
 #editorTools .fig { border: 1px solid var(--border); border-radius: 5px; padding: 6px;
