@@ -22,7 +22,7 @@ outfits:
     REDACTED
   scavenger: >
     oversized patched jacket, utility belt, fingerless gloves, goggles on head
-  nude: REDACTED
+  nude: REDACTED,
 
 # keeps the green from leaking onto a human partner in the frame
 negative_add: >
