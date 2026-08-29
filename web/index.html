@@ -4,51 +4,88 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PromptForge Studio</title>
-<style>
-  :root { color-scheme: dark; }
-  body { margin:0; font:14px/1.5 system-ui, sans-serif; background:#14161a; color:#e6e6e6;
-         display:flex; height:100vh; }
-  #inputs { width:380px; min-width:380px; border-right:2px solid #2a2e35; display:flex;
-            flex-direction:column; }
-  #inputs .scroll { flex:1; overflow:auto; padding:16px; }
-  #inputs .foot { padding:12px 16px; border-top:2px solid #2a2e35; }
-  #gallery { flex:1; overflow:auto; padding:16px;
-             display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:8px;
-             align-content:start; }
-  #gallery img { width:100%; border-radius:6px; border:2px solid #2a2e35; }
-  h1 { font-size:16px; margin:0 0 12px; }
-  button.gen { width:100%; padding:10px; background:#2e7d32; color:#fff; border:0;
-               border-radius:6px; font-weight:600; cursor:pointer; }
-  pre { white-space:pre-wrap; background:#1b1e24; padding:10px; border-radius:6px; font-size:12px; }
-  .muted { color:#8a8f98; }
-</style>
+<link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <div id="inputs">
     <div class="scroll">
-      <h1>PromptForge Studio <span class="muted" id="ver">scaffold</span></h1>
-      <p class="muted">Backend up. UI not built yet — this page confirms the
-        server serves and the API responds.</p>
-      <p><strong>ComfyUI:</strong> <span id="comfy">…</span></p>
-      <p><strong>Characters:</strong> <span id="chars">…</span></p>
-      <p><strong>Poses:</strong> <span id="poses">…</span></p>
-      <p><strong>Themes:</strong> <span id="themes">…</span></p>
-      <pre id="raw"></pre>
+      <h1>PromptForge <span class="muted" style="font-size:11px">
+        <span class="dot down" id="comfyDot"></span> <span id="comfyMsg">…</span></span></h1>
+
+      <h2>Characters <span class="muted" id="charHint"></span></h2>
+      <div id="charCards"></div>
+      <button class="small" id="addChar">+ Add character</button>
+
+      <h2>Theme</h2>
+      <select id="theme"></select>
+
+      <h2>Setting</h2>
+      <select id="setting"></select>
+      <input type="text" id="settingText" placeholder="…or extra setting tags">
+
+      <h2>Style</h2>
+      <select id="style"></select>
+      <input type="text" id="styleText" placeholder="…or extra style tags">
+
+      <div id="editorSection" style="display:none">
+        <h2>Skeleton <span class="muted" id="skHint"></span></h2>
+        <div id="editorWrap"><canvas id="poseCanvas" width="384" height="288"></canvas></div>
+        <div class="row" style="margin-top:6px">
+          <select id="poseLib" style="flex:2"></select>
+          <button class="small" id="poseLoad">Load</button>
+          <button class="small" id="poseSave">Save…</button>
+        </div>
+        <div id="editorTools"></div>
+      </div>
+
+      <h2>Model</h2>
+      <select id="model"></select>
+
+      <details>
+        <summary>Advanced</summary>
+        <div class="grid2" style="margin-top:6px">
+          <div><label>CFG</label><input type="number" id="cfg" step="0.5" value="6"></div>
+          <div><label>Steps</label><input type="number" id="steps" value="30"></div>
+          <div><label>Sampler</label><input type="text" id="sampler" value="dpmpp_2m_sde"></div>
+          <div><label>Scheduler</label><input type="text" id="scheduler" value="karras"></div>
+          <div><label>Width</label><input type="number" id="width" step="16" value="1152"></div>
+          <div><label>Height</label><input type="number" id="height" step="16" value="896"></div>
+          <div><label>Seed (-1 random)</label><input type="number" id="seed" value="-1"></div>
+          <div><label>Batch</label><input type="number" id="batch" value="1"></div>
+          <div><label>CN strength</label><input type="number" id="cn_strength" step="0.05" value="0.9"></div>
+          <div><label>CN end %</label><input type="number" id="cn_end" step="0.05" value="0.8"></div>
+        </div>
+        <label>Region layout (2 characters)</label>
+        <select id="layout">
+          <option>side by side - A left</option>
+          <option>side by side - A right</option>
+          <option>A lower / B upper</option>
+          <option>A upper / B lower</option>
+          <option>A center / B around</option>
+          <option>thirds - A left</option>
+        </select>
+      </details>
+
+      <h2>Negative</h2>
+      <textarea id="negative" placeholder="extra negative tags (merged with defaults + per-character)"></textarea>
+
+      <details id="previewBox">
+        <summary>Prompt preview</summary>
+        <div id="preview" style="margin-top:6px">—</div>
+      </details>
     </div>
-    <div class="foot"><button class="gen" disabled>Generate (not wired)</button></div>
+    <div class="foot">
+      <button class="gen" id="generate">Generate</button>
+      <button class="small" id="reroll" title="new random seed">🎲</button>
+    </div>
   </div>
+
   <div id="gallery"></div>
-<script>
-(async () => {
-  const p = await fetch('/api/presets').then(r => r.json());
-  document.getElementById('chars').textContent =
-    (p.characters.preset.map(c=>c.name).concat(p.characters.secondbrain.map(c=>c.name+' (SB)'))).join(', ') || '(none)';
-  document.getElementById('poses').textContent = p.cn_positions.map(c=>c.name).join(', ');
-  document.getElementById('themes').textContent = p.themes.map(t=>t.name).join(', ');
-  document.getElementById('raw').textContent = JSON.stringify({checkpoints:p.checkpoints, secondbrain_dir:p.secondbrain_dir}, null, 1);
-  const s = await fetch('/api/comfy/status').then(r => r.json());
-  document.getElementById('comfy').textContent = s.up ? `up — ${s.checkpoints.length} checkpoints` : `down (${s.error||''})`;
-})();
-</script>
+
+  <div id="lightbox"><img id="lbImg"><div class="info" id="lbInfo"></div></div>
+  <div id="toast"></div>
+
+<script src="/editor.js"></script>
+<script src="/app.js"></script>
 </body>
 </html>

@@ -287,6 +287,16 @@ def resolve_job(spec):
     return j
 
 
+@app.route("/api/preview", methods=["POST"])
+def preview():
+    spec = request.get_json(force=True, silent=True) or {}
+    try:
+        job = resolve_job(spec)
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"prompt_used": job["prompt_used"], "n_chars": job["n_chars"]})
+
+
 @app.route("/api/generate", methods=["POST"])
 def generate():
     spec = request.get_json(force=True, silent=True) or {}
@@ -308,16 +318,34 @@ def job(jid):
 
 @app.route("/api/gallery")
 def gallery():
+    """Newest-first list of gallery images with their sidecar metadata."""
     items = []
-    if os.path.isdir(GALLERY_DIR):
-        for f in sorted(os.listdir(GALLERY_DIR), reverse=True):
-            if f.endswith(".png"):
-                items.append({"file": f})
+    if not os.path.isdir(GALLERY_DIR):
+        return jsonify(items)
+    pngs = [f for f in os.listdir(GALLERY_DIR) if f.endswith(".png")]
+    pngs.sort(key=lambda f: os.path.getmtime(os.path.join(GALLERY_DIR, f)), reverse=True)
+    side_cache = {}
+    for f in pngs:
+        stem = f.split("_")[0]
+        if stem not in side_cache:
+            sp = os.path.join(GALLERY_DIR, f"{stem}.json")
+            try:
+                with open(sp) as fh:
+                    side_cache[stem] = json.load(fh)
+            except OSError:
+                side_cache[stem] = {}
+        items.append({"file": f, "meta": side_cache[stem]})
     return jsonify(items)
 
 
-@app.route("/api/image/<path:name>")
+@app.route("/api/image/<path:name>", methods=["GET", "DELETE"])
 def image(name):
+    if request.method == "DELETE":
+        safe = os.path.basename(name)
+        p = os.path.join(GALLERY_DIR, safe)
+        if os.path.isfile(p):
+            os.remove(p)
+        return jsonify({"deleted": safe})
     return send_from_directory(GALLERY_DIR, name)
 
 
