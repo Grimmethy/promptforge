@@ -62,7 +62,7 @@ details > summary { cursor: pointer; font-size: 11px; text-transform: uppercase;
                 max-height: 120px; overflow: auto; margin-bottom: 4px; }
 details.presetEd { margin: 8px 0 4px; padding: 6px 8px; }
 details.presetEd textarea.yaml { width: 100%; margin: 6px 0; font: 11px/1.4 ui-monospace, monospace;
-                                 white-space: pre; overflow-wrap: normal; }
+                                 white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: hidden; }
 
 #preview { white-space: pre-wrap; background: var(--panel); border: 1px solid var(--border);
            border-radius: 6px; padding: 8px; font-size: 11px; max-height: 180px; overflow: auto; }
