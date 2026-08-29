@@ -295,6 +295,7 @@ class PoseEditor {
     const { ctx, cv } = this, W = cv.width, H = cv.height;
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = '#0c0d10'; ctx.fillRect(0, 0, W, H);
+    this._drawGrid(W, H);
     this._drawGizmo(W, H);
 
     this.rigs.forEach((r, fi) => {
@@ -321,6 +322,47 @@ class PoseEditor {
       });
     });
     this._drawTip(W, H);
+  }
+  // Blender-style reference box: a ground plane under the figure and a back
+  // plane behind it, drawn in perspective through the orbit camera.
+  _drawGrid(W, H) {
+    if (!this.rigs.length) return;
+    let mnx = 9, mxx = -9, mny = 9, mxy = -9, mnz = 9, mxz = -9;
+    for (const r of this.rigs) for (const k of RIG.joints) {
+      const [x, y, z] = r.joints[k];
+      if (x < mnx) mnx = x; if (x > mxx) mxx = x;
+      if (y < mny) mny = y; if (y > mxy) mxy = y;
+      if (z < mnz) mnz = z; if (z > mxz) mxz = z;
+    }
+    const pad = 0.12, step = 0.1;
+    const floorY = mxy + 0.02, backZ = mnz - 0.02;
+    const x0 = Math.min(mnx - pad, -0.3), x1 = Math.max(mxx + pad, 0.3);
+    const z0 = backZ, z1 = Math.max(mxz + pad, 0.3);
+    const yTop = Math.min(mny - pad, floorY - 0.5);
+    const snap = v => Math.ceil(v / step) * step;
+    const { ctx } = this;
+    const line = (a, b, col, w) => {
+      const p = this._project(a), q = this._project(b);
+      ctx.strokeStyle = col; ctx.lineWidth = w || 1;
+      ctx.beginPath(); ctx.moveTo(p.x * W, p.y * H); ctx.lineTo(q.x * W, q.y * H); ctx.stroke();
+    };
+    const gLine = 'rgba(110,140,170,0.30)';   // ground
+    const bLine = 'rgba(96,108,140,0.22)';    // back plane
+    const edge = 'rgba(150,170,190,0.45)';
+
+    // ground plane (y = floorY)
+    for (let x = snap(x0); x <= x1 + 1e-6; x += step) line([x, floorY, z0], [x, floorY, z1], gLine);
+    for (let z = snap(z0); z <= z1 + 1e-6; z += step) line([x0, floorY, z], [x1, floorY, z], gLine);
+    // back plane (z = backZ)
+    for (let x = snap(x0); x <= x1 + 1e-6; x += step) line([x, yTop, backZ], [x, floorY, backZ], bLine);
+    for (let y = snap(yTop); y <= floorY + 1e-6; y += step) line([x0, y, backZ], [x1, y, backZ], bLine);
+    // box edges + floor/back seam
+    line([x0, floorY, backZ], [x1, floorY, backZ], edge, 1.5);
+    line([x0, floorY, backZ], [x0, floorY, z1], edge, 1.2);
+    line([x1, floorY, backZ], [x1, floorY, z1], edge, 1.2);
+    line([x0, yTop, backZ], [x0, floorY, backZ], edge, 1.2);
+    line([x1, yTop, backZ], [x1, floorY, backZ], edge, 1.2);
+    line([x0, yTop, backZ], [x1, yTop, backZ], edge, 1.2);
   }
   _drawGizmo(W, H) {
     const { ctx } = this, ox = 26, oy = H - 24, len = 16;
