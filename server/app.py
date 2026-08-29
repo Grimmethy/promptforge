@@ -92,7 +92,10 @@ def presets():
         doc = data.get_cn_position(p)
         cn.append({"name": p, "people": doc.get("people", 1),
                    "tags": doc.get("tags", ""),
-                   "views": data.cn_position_views(p)})
+                   # only views that have a real keypoint file (for the editor's
+                   # "load pose" picker); the tag-only angles aren't loadable
+                   "views": list((doc.get("views") or {}).keys()) or ["from_side"],
+                   "all_views": data.cn_position_views(p)})
 
     return jsonify({
         "characters": {"preset": preset_chars, "secondbrain": sb_chars},

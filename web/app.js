@@ -133,8 +133,11 @@ function syncEditor() {
 
 function buildEditorTools() {
   const wrap = $('#editorTools'); wrap.innerHTML = '';
-  wrap.append(el('button', { class: 'small', onclick: () => editor.undo() }, '↶ undo'),
-              el('button', { class: 'small', onclick: () => editor.redo() }, '↷ redo'));
+  wrap.append(el('div', { class: 'undoredo' }, [
+    el('button', { class: 'small', onclick: () => editor.undo() }, '↶ undo'),
+    el('button', { class: 'small', onclick: () => editor.redo() }, '↷ redo'),
+    el('span', { class: 'muted', style: 'font-size:10px;align-self:center' }, 'drag joints · right-click a joint to toggle'),
+  ]));
   const aspect = (+$('#width').value) / (+$('#height').value);
   editor.figures.forEach((_, fi) => {
     wrap.append(el('div', { class: 'fig' }, [
