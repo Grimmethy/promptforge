@@ -11,7 +11,7 @@ import urllib.request
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from core import assemble, data, pose_ops, randomizer, secondbrain, themes
+from core import assemble, comfy, data, pose_ops, randomizer, secondbrain, themes
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(os.path.dirname(_HERE), "web")
@@ -205,16 +205,105 @@ def api_assemble():
     return jsonify(assemble.assemble(spec))
 
 
-# --------------------------------------------------------- generation (stub)
+# --------------------------------------------------------------- generation
+
+_DEFAULTS = dict(cfg=6.0, steps=30, sampler="dpmpp_2m_sde", scheduler="karras",
+                 seed=-1, width=1152, height=896, batch=1,
+                 cn_strength=0.9, cn_end=0.8, layout="side by side - A left")
+
+
+def _cat_tags(category, value):
+    """A preset key -> its tag string; anything else -> passed through."""
+    v = (value or "").strip()
+    if not v or v == "none":
+        return ""
+    if v in data.list_entries(category):
+        return data.get_entry(category, v)[0]
+    return v
+
+
+def resolve_job(spec):
+    j = dict(_DEFAULTS)
+    for k in _DEFAULTS:
+        if spec.get(k) is not None:
+            j[k] = spec[k]
+    j["model"] = spec.get("model") or (list_checkpoints() or ["novaFurryXL_ilV140.safetensors"])[0]
+
+    th = themes.resolve(spec.get("theme"))
+    style_tags = _cat_tags("styles", spec.get("style")) or th["style"]
+    setting_tags = _cat_tags("backgrounds", spec.get("setting")) or th["setting_bias"]
+    scene_tags = data.normalize_kw(setting_tags, style_tags, th["palette"], th["lighting"])
+
+    chars = [c for c in (spec.get("characters") or []) if c][:2]
+    n = len(chars)
+    j["n_chars"] = n
+
+    char_segs, char_negs = [], []
+    for c in chars:
+        if c.get("source") == "secondbrain" and not c.get("text"):
+            sb = secondbrain.get_character(c.get("name", ""))
+            c = {**c, "text": sb.get("base", "")}
+        seg, neg = assemble.character_segment(c)
+        char_segs.append(seg)
+        if neg:
+            char_negs.append(neg)
+
+    # pose / skeleton
+    pose_tags = ""
+    frame = None
+    sk = spec.get("skeleton") or {}
+    if sk.get("people"):
+        frame = {"people": sk["people"],
+                 "canvas_width": j["width"], "canvas_height": j["height"]}
+    elif spec.get("pose_position"):
+        path, vtags = data.cn_view_skeleton(spec["pose_position"],
+                                            spec.get("pose_view", "from_side"))
+        if path:
+            frame = pose_ops.load_json(path)
+        pdoc = data.get_cn_position(spec["pose_position"])
+        pose_tags = data.normalize_kw(pdoc.get("tags", ""), vtags,
+                                      data.load_view_tags().get(spec.get("pose_view", ""), ""))
+    if frame is not None:
+        frame = pose_ops.transform(frame, canvas_w=j["width"], canvas_h=j["height"])
+        j["skeleton_png"] = pose_ops.render_png(frame, j["width"], j["height"])
+
+    j["negative"] = data.normalize_kw(
+        (spec.get("negative") or "").strip(), *char_negs, th["negative_add"],
+        assemble.DEFAULT_NEGATIVE)
+
+    if n == 2:
+        j["region_a"] = char_segs[0]
+        j["region_b"] = char_segs[1]
+        j["base"] = data.normalize_kw(assemble.DEFAULT_QUALITY, scene_tags, pose_tags)
+        j["prompt_used"] = {"region_a": j["region_a"], "region_b": j["region_b"],
+                            "base": j["base"], "negative": j["negative"]}
+    else:
+        built = assemble.assemble({
+            "characters": chars, "scene_tags": scene_tags, "pose_tags": pose_tags})
+        j["positive"] = built["positive"]
+        j["prompt_used"] = {"positive": j["positive"], "negative": j["negative"]}
+
+    j["spec"] = spec
+    return j
+
 
 @app.route("/api/generate", methods=["POST"])
 def generate():
-    return jsonify({"error": "not implemented yet (scaffold)"}), 501
+    spec = request.get_json(force=True, silent=True) or {}
+    try:
+        job = resolve_job(spec)
+        jid = comfy.start(job, GALLERY_DIR)
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"job_id": jid, "prompt_used": job["prompt_used"], "seed": job["seed"]})
 
 
 @app.route("/api/job/<jid>")
 def job(jid):
-    return jsonify({"error": "not implemented yet (scaffold)"}), 501
+    rec = comfy.get_job(jid)
+    if not rec:
+        return jsonify({"error": "unknown job"}), 404
+    return jsonify(rec)
 
 
 @app.route("/api/gallery")
