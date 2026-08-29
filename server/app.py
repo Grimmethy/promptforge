@@ -6,6 +6,7 @@ delegated to ComfyUI (:8188) — see core/comfy.py (added next). Bind 127.0.0.1.
 
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 
@@ -236,9 +237,56 @@ _GAZE_AT_CAMERA = {
 
 
 def _face_away(text):
-    """Drop gaze-toward-camera tokens (used when the camera is behind)."""
+    """Drop gaze-toward-camera tokens — the 3/4-to-profile-back band."""
     return ", ".join(t.strip() for t in str(text).split(",")
                      if t.strip() and t.strip().lower() not in _GAZE_AT_CAMERA)
+
+
+# --- full back view: face + front-of-body tokens all contradict the pose ------
+_FACE_WORDS = {
+    "eye", "eyes", "eyebrow", "eyebrows", "eyelash", "eyelashes", "pupil", "pupils",
+    "iris", "gaze", "nose", "lips", "lip", "mouth", "teeth", "tooth", "fang", "fangs",
+    "tongue", "snaggletooth", "blush", "blushing", "cheek", "cheeks", "smile",
+    "smiling", "smirk", "grin", "grinning", "frown", "pout", "scowl", "smug",
+    "expression", "wink", "ahegao", "drool", "saliva", "makeup", "lipstick",
+    "eyeshadow", "facial", "freckle", "freckles", "eyepatch", "eyewear", "glasses",
+}
+_FRONT_BODY_WORDS = {
+    "breast", "breasts", "cleavage", "nipple", "nipples", "areola", "areolae",
+    "underboob", "sideboob", "busty", "bosom", "boob", "boobs", "navel", "belly",
+}
+_FACE_PHRASES = {
+    "looking at viewer", "looking at camera", "looking at another", "eye contact",
+    "open mouth", "closed eyes", "half-closed eyes", "parted lips", "facing viewer",
+    "facing the viewer", "front view", "gentle expression", "soft features", "face",
+    "flat chest", "small breasts", "medium breasts", "large breasts", "huge breasts",
+    "bare breasts", "covered nipples",
+}
+_LOOK_BACK = ("looking back", "over the shoulder", "over-the-shoulder",
+              "head turned", "turning head", "looking over")
+_WORD_RE = re.compile(r"[a-z]+")
+
+
+def _rear_strip(text):
+    """Full back view: drop every face and front-of-torso token so 'back view'
+    isn't outvoted. Skipped entirely if the subject is turning to face the
+    viewer (looking back over the shoulder)."""
+    low = text.lower()
+    if any(p in low for p in _LOOK_BACK):
+        return text
+    out = []
+    for tok in str(text).split(","):
+        t = tok.strip()
+        if not t:
+            continue
+        tl = t.lower()
+        if tl in _FACE_PHRASES:
+            continue
+        words = set(_WORD_RE.findall(tl))
+        if words & _FACE_WORDS or words & _FRONT_BODY_WORDS:
+            continue
+        out.append(t)
+    return ", ".join(out)
 
 
 def _frame_has_joints(frame):
@@ -323,18 +371,26 @@ def resolve_job(spec):
         j["skeleton_png"] = pose_ops.render_png(frame, j["width"], j["height"])
     j["pose_tags"] = pose_tags
 
-    # A rear/near-rear camera contradicts any "looking at viewer" gaze the
-    # character preset carries — drop those tokens and assert the turn-away so
-    # the model doesn't split the difference and render the face anyway.
-    rear = abs(yaw) > 0.55
-    if rear:
-        char_segs = [_face_away(s) for s in char_segs]
-        pose_tags = data.normalize_kw(pose_tags, "facing away, back turned to viewer")
+    # A rear camera contradicts the character's face/front-of-body tokens.
+    #  - 3/4 .. near-profile-back (|yaw| > 0.55): just drop gaze-at-camera.
+    #  - full back view (|yaw| >= 0.8): strip every face + breast/front token so
+    #    "back view" isn't outvoted; skipped if the subject is looking back.
+    rear_neg = ""
+    ay = abs(yaw)
+    if ay > 0.55:
+        strip = _rear_strip if ay >= 0.8 else _face_away
+        char_segs = [strip(s) for s in char_segs]
+        pose_tags = data.normalize_kw(strip(pose_tags),
+                                      "(facing away:1.2), back turned to viewer")
         j["pose_tags"] = pose_tags
         j["char_segments"] = [{"segment": s} for s in char_segs]
+        if ay >= 0.8 and not any(p in " ".join(char_segs).lower()
+                                 for p in _LOOK_BACK):
+            rear_neg = ("looking at viewer, eye contact, facing viewer, front view, "
+                        "face focus, portrait")
 
     j["negative"] = data.normalize_kw(
-        (spec.get("negative") or "").strip(), *char_negs, th["negative_add"],
+        (spec.get("negative") or "").strip(), rear_neg, *char_negs, th["negative_add"],
         assemble.DEFAULT_NEGATIVE)
 
     if n == 2:

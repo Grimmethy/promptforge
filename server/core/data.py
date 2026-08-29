@@ -312,7 +312,7 @@ def orientation_tags(yaw=0.0, pitch=0.0):
     if ay <= 0.12:
         out.append("front view, facing viewer")
     elif ay >= 0.82:
-        out.append("from behind, back view, view from behind, facing away")
+        out.append("(from behind:1.3), (back view:1.2), view from behind, facing away")
     else:
         face = "facing left" if y > 0 else "facing right"
         if ay <= 0.4:
