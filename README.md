@@ -49,6 +49,23 @@ Story generation and video generation are **separate future plugins** — see
 
 ## Status
 
-Scaffold: core ported, `/api/presets`, `/api/pose/*`, `/api/assemble`,
-`/api/randomize-character`, `/api/comfy/status` live. `/api/generate` +
-`/api/job` + the real UI + the editor are next.
+**v1 working end-to-end.**
+
+- Backend: `/api/presets`, `/api/character`, `/api/theme`, `/api/pose/*`,
+  `/api/pose/render`, `/api/save-{pose,character}`, `/api/randomize-character`,
+  `/api/preview`, `/api/generate` + `/api/job/<id>`, `/api/gallery`,
+  `/api/image/<name>` (GET+DELETE), `/api/comfy/status`.
+- `core/comfy.py` builds + submits the graph in all three shapes
+  (0 = scene-only, 1 = +ControlNet if a skeleton, 2 = regional + ControlNet).
+  Verified against live ComfyUI on every shape.
+- UI (`web/`): character cards (0–2, +Add / remove, preset·SB·custom source),
+  theme / setting / style, model + advanced, live prompt preview, image grid
+  with per-tile menu + lightbox, localStorage persistence.
+- Editor (`web/editor.js`): COCO-18 canvas, one draggable figure per character,
+  right-click toggle, per-figure mirror / scale / dutch / nudge, undo/redo,
+  load / save library pose.
+- Browser QA done via headless CDP (page render, add-character, pose load,
+  full Generate → gallery loop; no JS errors).
+
+Not built (deliberately — separate future plugins): story / shot sequencing,
+video. WebSocket generation progress is coarse (status polling) for now.
