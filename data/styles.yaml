@@ -1,0 +1,15 @@
+# Art style / rendering. One BREAK segment. Keep these short - style tags are
+# strong and long lists fight the checkpoint.
+entries:
+  none: ""
+  anime clean: anime style, clean lineart, cel shading, vibrant colors, flat colors
+  anime painterly: anime style, painterly, soft shading, visible brushwork, warm palette
+  semi realistic: semi-realistic, detailed rendering, soft lighting, subsurface scattering
+  muted niji: >
+    muted colors, soft palette, gentle contrast, film-like grain, atmospheric
+  high contrast noir: high contrast, dramatic shadows, chiaroscuro, moody, desaturated
+  glossy 3d: 3d, octane render, glossy, studio lighting, subsurface scattering
+  sketch: rough sketch, pencil lines, monochrome, unfinished, hatching
+  watercolor: watercolor, soft edges, paper texture, bleeding colors, pastel
+  retro anime 90s: 1990s anime style, retro, film grain, muted colors, cel animation
+  ink and wash: ink wash, sumi-e, limited palette, expressive brush, negative space

@@ -1,0 +1,67 @@
+# Theme presets. Each is a bundle of tag contributions the generator folds into
+# the scene chunk. `style` / `setting_bias` are suggestions the UI pre-fills into
+# the Style / Setting boxes (and the user can override); `palette` + `lighting`
+# always apply. `negative_add` is merged into the negative prompt.
+themes:
+  none:
+    style: ""
+    setting_bias: ""
+    palette: ""
+    lighting: ""
+    negative_add: ""
+
+  grimdark:
+    style: "high contrast noir"
+    setting_bias: "ruined, oppressive, decayed architecture"
+    palette: "desaturated, muted earth tones, cold shadows, sickly green accents"
+    lighting: "low key lighting, hard shadows, single harsh light source, volumetric haze"
+    negative_add: "bright, cheerful, pastel, clean"
+
+  dark fantasy:
+    style: "anime painterly"
+    setting_bias: "gothic, candlelit, ancient stone, overgrown"
+    palette: "deep jewel tones, gold accents, warm firelight against blue shadow"
+    lighting: "dramatic chiaroscuro, warm rim light, dust motes in shafts of light"
+    negative_add: "modern, sci-fi, neon"
+
+  cozy slice of life:
+    style: "anime clean"
+    setting_bias: "warm interior, soft furnishings, plants, afternoon"
+    palette: "warm neutrals, soft pastels, honeyed light"
+    lighting: "soft diffuse window light, gentle bloom, no harsh shadows"
+    negative_add: "grimy, violent, horror, dark"
+
+  sci-fi horror:
+    style: "glossy 3d"
+    setting_bias: "derelict spacecraft, wet corridors, exposed machinery"
+    palette: "teal and orange, sickly green emergency glow, black"
+    lighting: "flickering strip lights, red alert glow, deep shadow, wet reflections"
+    negative_add: "warm, cozy, medieval, cheerful"
+
+  neon noir:
+    style: "semi realistic"
+    setting_bias: "rain-slick city street at night, signage, alley"
+    palette: "magenta and cyan neon, black wet asphalt, sodium orange"
+    lighting: "hard neon rim light, reflected puddle light, deep contrast, atmospheric fog"
+    negative_add: "daylight, rural, medieval"
+
+  storybook:
+    style: "watercolor"
+    setting_bias: "whimsical, oversized nature, gentle hills"
+    palette: "soft primaries, cream paper, gentle gradients"
+    lighting: "flat gentle daylight, soft edges, minimal shadow"
+    negative_add: "photorealistic, gore, harsh"
+
+  retro anime:
+    style: "retro anime 90s"
+    setting_bias: "worn urban, analog technology, hand-painted backgrounds"
+    palette: "muted film colors, warm grain, faded"
+    lighting: "cel-shaded, painted highlights, soft haze, film grain"
+    negative_add: "3d, modern digital gloss, hyperdetailed"
+
+  ethereal:
+    style: "ink and wash"
+    setting_bias: "misty, minimal, water and sky, negative space"
+    palette: "monochrome with a single accent hue, pale washes"
+    lighting: "soft backlight, glow, low contrast, atmospheric depth"
+    negative_add: "cluttered, high contrast, harsh"

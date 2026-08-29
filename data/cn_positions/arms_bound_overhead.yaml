@@ -1,0 +1,8 @@
+name: Arms Bound Overhead
+people: 1
+tags: arms up, wrists bound together, stretched, standing
+default_view: from_side
+views:
+  from_side:
+    file: arms_bound_overhead__from_side.json
+    tags: ''

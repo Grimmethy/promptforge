@@ -1,0 +1,22 @@
+# Marcus - human male partner. Skin tone is stated explicitly and the negative
+# blocks green so he doesn't inherit a goblin partner's colour.
+name: Marcus
+weight: 1.0
+base: >
+  1boy, solo focus, human, adult male, (dark-skinned male:1.2), human skin,
+  tan skin, muscular, toned, short black hair, stubble, body hair,
+  large hands, faceless male
+
+expressions:
+  default: ""
+  grim: serious, clenched jaw, frown
+  leering: grin, looking down, half-closed eyes
+
+outfits:
+  default: >
+    open shirt, rolled sleeves, dark trousers, leather belt
+  nude: REDACTED
+  harness: REDACTED
+
+negative_add: >
+  green skin, green-skinned male, goblin, orc, colored skin, pointy ears

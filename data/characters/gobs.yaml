@@ -1,0 +1,30 @@
+# Gobs - the orange-haired goblin girl.
+# Skin colour is weighted hard because muted-palette Illustrious checkpoints
+# desaturate green toward grey; drop the weight if it reads neon.
+name: Gobs
+weight: 1.0
+base: >
+  1girl, goblin, goblin girl, (green skin:1.3), green body, colored skin,
+  pointy ears, petite, skinny, thin waist, flat chest, small breasts,
+  orange hair, wolf cut, messy hair, short hair, yellow eyes,
+  sharp teeth, fang, snaggletooth, pig nose, short nubby tail
+
+expressions:
+  default: ""
+  angry: furrowed brow, clenched teeth, snarl, wild eyes
+  crying: crying, tears, half-closed eyes, trembling
+  smug: smug, grin, half-closed eyes, looking at viewer
+
+outfits:
+  default: >
+    torn tattered rags, ragged loincloth, dirty, worn leather straps
+  bdsm: >
+    REDACTED
+  scavenger: >
+    oversized patched jacket, utility belt, fingerless gloves, goggles on head
+  nude: REDACTED
+
+# keeps the green from leaking onto a human partner in the frame
+negative_add: >
+  green-skinned male, muscular green man, orc male, goblin man,
+  colored skin male, green groin, pale goblin, white-skinned goblin

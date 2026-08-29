@@ -1,0 +1,9 @@
+name: Doggystyle
+people: 2
+tags: REDACTED, motion
+  lines
+default_view: from_side
+views:
+  from_side:
+    file: doggystyle__from_side.json
+    tags: ''

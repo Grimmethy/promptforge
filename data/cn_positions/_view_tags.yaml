@@ -1,0 +1,10 @@
+# Camera / view-angle -> prompt tags. Every position's view dropdown offers
+# these keys (plus any it defines its own skeleton for). Used by the
+# Position - ControlNet node to fold the right framing tags into its segment.
+front: "front view, facing viewer"
+three_quarter: "3/4 view"
+from_side: "from side, profile view"
+from_behind: "from behind, back view, view from behind"
+from_above: "from above, high angle, overhead shot, looking down"
+from_below: "from below, low angle, looking up"
+pov: "pov, first person view, looking at viewer"

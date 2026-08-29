@@ -1,0 +1,41 @@
+# Outfit pools for the Character Randomizer, keyed by the `outfit_style` dropdown.
+# The randomizer picks ONE line from the chosen pool (or a random pool when set
+# to "random"). "none" leaves the character unclothed-agnostic (no outfit added).
+
+cute:
+  - frilly dress, lace trim, puffy sleeves, mary janes
+  - pastel sweater, pleated skirt, knee socks, loafers
+  - sailor school uniform, neckerchief, thighhighs
+  - sundress, straw sun hat, sandals
+  - oversized hoodie, shorts, striped socks
+  - cardigan, blouse, long skirt, ribbon
+
+fantasy:
+  - leather armor, tunic, bracers, worn boots
+  - flowing robe, hood, rope belt, pendant
+  - ranger cloak, leather jerkin, belt pouches, dagger
+  - chainmail shirt, tabard, gauntlets
+  - witch hat, layered dress, corset, buckled boots
+  - fur-lined cloak, tunic, fur boots, satchel
+
+bdsm:
+  - REDACTED
+  - REDACTED
+  - REDACTED
+  - REDACTED
+  - leather straps, ball gag, ankle cuffs
+  - lace-up bustier, collar with leash, arm binder
+
+casual:
+  - t-shirt, jeans, sneakers
+  - tank top, cargo pants, boots
+  - button-up shirt, rolled sleeves, slacks
+  - crop top, high-waisted shorts, sandals
+  - flannel shirt, leggings, ankle boots
+
+formal:
+  - evening gown, elbow gloves, heels
+  - tailored pantsuit, blouse, oxfords
+  - cocktail dress, clutch, strappy heels
+  - three-piece look, waistcoat, pocket watch
+  - silk qipao, embroidered, updo

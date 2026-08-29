@@ -1,0 +1,119 @@
+# Trait pools for the Character Randomizer.
+# - species: weighted; the first comma-token is the dropdown key ("goblin", ...)
+# - single-pick axes: body, skin, hair_length, hair_style, hair_color, eyes, face_features
+# - multi-pick axes: distinguishing (0-2), accessories (0-2, "none" is ignored)
+# When an axis is "frozen" (vary_* unticked) the FIRST entry is used - order them
+# so entry 0 is a sensible default.
+
+# The randomizer always prepends "1girl"; the first comma-token here is the
+# dropdown key ("human", "elf", "goblin", ...).
+species:
+  - {kw: "human", weight: 6}
+  - {kw: "elf, long pointed ears", weight: 3}
+  - {kw: "goblin, green skin, pointy ears, sharp teeth, small fangs", weight: 3}
+  - {kw: "catgirl, cat ears, cat tail, slit pupils", weight: 2}
+  - {kw: "orc, muscular female, green skin, tusks, pointy ears", weight: 1}
+  - {kw: "dark elf, dark skin, long pointed ears, white hair", weight: 2}
+  - {kw: "demon girl, small horns, pointed tail, slit pupils", weight: 1}
+  - {kw: "fox girl, kitsune, fox ears, multiple tails", weight: 1}
+
+body:
+  - petite, slim, small breasts
+  - average build, medium breasts
+  - athletic, toned, abs, small breasts
+  - curvy, wide hips, large breasts, thick thighs
+  - tall, long legs, lithe
+  - short, chubby, soft belly, large breasts
+
+skin:
+  - fair skin
+  - pale skin
+  - tan skin
+  - dark skin
+  - olive skin
+  - freckled skin, freckles
+
+hair_length:
+  - short hair
+  - bob cut
+  - shoulder-length hair
+  - long hair
+  - very long hair
+  - hair past waist
+
+hair_style:
+  - straight hair
+  - wavy hair
+  - curly hair
+  - messy hair
+  - wolf cut
+  - twintails
+  - ponytail
+  - braided hair, single braid
+  - hair bun
+  - hime cut
+
+hair_color:
+  - black hair
+  - dark brown hair
+  - light brown hair
+  - blonde hair
+  - platinum blonde hair
+  - orange hair
+  - red hair
+  - white hair
+  - silver hair
+  - blue hair
+  - pink hair
+  - green hair
+  - purple hair
+
+eyes:
+  - brown eyes
+  - blue eyes
+  - green eyes
+  - amber eyes
+  - grey eyes
+  - violet eyes
+  - red eyes
+  - heterochromia
+  - golden eyes
+
+face_features:
+  - soft features
+  - sharp eyes
+  - round face
+  - high cheekbones
+  - freckles on face
+  - beauty mark
+  - tired eyes, eyebags
+  - gentle smile
+
+distinguishing:
+  - scar across one eye
+  - eyepatch
+  - facial tattoo
+  - round glasses
+  - small horns
+  - pointed elf ears
+  - fangs
+  - nose piercing
+  - ear piercings
+  - flower in hair
+  - hair ornament
+  - war paint
+  - bandage on cheek
+  - mole under eye
+
+accessories:
+  - none
+  - choker
+  - collar
+  - hair ribbon
+  - pendant necklace
+  - hoop earrings
+  - fingerless gloves
+  - arm warmers
+  - thigh strap
+  - belt pouches
+  - anklet

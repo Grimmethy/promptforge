@@ -1,0 +1,8 @@
+name: Standing From Behind
+people: 2
+tags: REDACTED
+default_view: from_side
+views:
+  from_side:
+    file: standing_from_behind__from_side.json
+    tags: ''

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PromptForge Studio</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; font:14px/1.5 system-ui, sans-serif; background:#14161a; color:#e6e6e6;
+         display:flex; height:100vh; }
+  #inputs { width:380px; min-width:380px; border-right:2px solid #2a2e35; display:flex;
+            flex-direction:column; }
+  #inputs .scroll { flex:1; overflow:auto; padding:16px; }
+  #inputs .foot { padding:12px 16px; border-top:2px solid #2a2e35; }
+  #gallery { flex:1; overflow:auto; padding:16px;
+             display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:8px;
+             align-content:start; }
+  #gallery img { width:100%; border-radius:6px; border:2px solid #2a2e35; }
+  h1 { font-size:16px; margin:0 0 12px; }
+  button.gen { width:100%; padding:10px; background:#2e7d32; color:#fff; border:0;
+               border-radius:6px; font-weight:600; cursor:pointer; }
+  pre { white-space:pre-wrap; background:#1b1e24; padding:10px; border-radius:6px; font-size:12px; }
+  .muted { color:#8a8f98; }
+</style>
+</head>
+<body>
+  <div id="inputs">
+    <div class="scroll">
+      <h1>PromptForge Studio <span class="muted" id="ver">scaffold</span></h1>
+      <p class="muted">Backend up. UI not built yet — this page confirms the
+        server serves and the API responds.</p>
+      <p><strong>ComfyUI:</strong> <span id="comfy">…</span></p>
+      <p><strong>Characters:</strong> <span id="chars">…</span></p>
+      <p><strong>Poses:</strong> <span id="poses">…</span></p>
+      <p><strong>Themes:</strong> <span id="themes">…</span></p>
+      <pre id="raw"></pre>
+    </div>
+    <div class="foot"><button class="gen" disabled>Generate (not wired)</button></div>
+  </div>
+  <div id="gallery"></div>
+<script>
+(async () => {
+  const p = await fetch('/api/presets').then(r => r.json());
+  document.getElementById('chars').textContent =
+    (p.characters.preset.map(c=>c.name).concat(p.characters.secondbrain.map(c=>c.name+' (SB)'))).join(', ') || '(none)';
+  document.getElementById('poses').textContent = p.cn_positions.map(c=>c.name).join(', ');
+  document.getElementById('themes').textContent = p.themes.map(t=>t.name).join(', ');
+  document.getElementById('raw').textContent = JSON.stringify({checkpoints:p.checkpoints, secondbrain_dir:p.secondbrain_dir}, null, 1);
+  const s = await fetch('/api/comfy/status').then(r => r.json());
+  document.getElementById('comfy').textContent = s.up ? `up — ${s.checkpoints.length} checkpoints` : `down (${s.error||''})`;
+})();
+</script>
+</body>
+</html>

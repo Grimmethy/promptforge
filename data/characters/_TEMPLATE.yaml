@@ -1,0 +1,30 @@
+# Copy this file to <name>.yaml (lowercase, no spaces) to add a character.
+# Files starting with "_" are hidden from the dropdown.
+#
+#   name:   label only (free text)
+#   weight: optional; when not 1.0 the whole segment is wrapped (text:weight)
+#   base:   the always-on keywords for this character (Danbooru tags work best;
+#           lead with 1girl/1boy + species + the traits that make them unique)
+#   expressions: optional named add-ons; picked from the "expression" dropdown
+#   outfits:     one or more; picked from the "outfit" dropdown. Always include
+#                a "default". Add as many as you like.
+#   negative_add: optional; surfaces on the node's 2nd output for the Assembler.
+
+name: New Character
+weight: 1.0
+base: >
+  1girl, (trait, trait, trait),
+  hair colour + style, eye colour, body type, distinguishing features
+
+expressions:
+  default: ""
+  angry: furrowed brow, clenched teeth
+
+outfits:
+  default: >
+    describe the everyday outfit here
+  alt: >
+    describe an alternate outfit here
+  nude: REDACTED
+
+negative_add: ""

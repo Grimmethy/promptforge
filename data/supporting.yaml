@@ -1,0 +1,24 @@
+# Supporting characters / extras. Gets its own BREAK segment.
+# For a full named character as a supporting figure, use the node's
+# `from_character` dropdown instead of (or with) these presets.
+entries:
+  none: ""
+  human male partner: >
+    1boy, (dark-skinned male:1.3), human male, human skin, tan, muscular,
+    body hair, faceless male, large hands
+  pale human male: >
+    1boy, human male, pale skin, lean, short hair, faceless male
+  masked guard: >
+    1other, armored guard, full helmet, dark uniform, standing in background,
+    out of focus
+  goblin crowd: >
+    multiple girls, background, crowd of goblin girls, green skin, watching,
+    blurry, depth of field
+  caged prisoners: >
+    multiple girls, background, prisoners in barred cages, reaching through bars,
+    chains, blurry background
+  hooded cultists: >
+    multiple people, background, hooded figures, robes, holding candles,
+    facing away, dim
+  small familiar: >
+    small creature, familiar, perched on shoulder, glowing eyes, cute

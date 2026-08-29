@@ -1,0 +1,11 @@
+name: All Fours
+people: 1
+tags: all fours, on hands and knees, arched back
+default_view: from_side
+views:
+  from_side:
+    file: all_fours__from_side.json
+    tags: ''
+  from_behind:
+    file: all_fours__from_behind.json
+    tags: ''

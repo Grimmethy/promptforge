@@ -1,0 +1,35 @@
+# Setting / environment. One BREAK segment (shares the "scene" chunk with
+# pose/position/style when the Assembler's group_scene is on).
+entries:
+  none: ""
+  abandoned vault: >
+    abandoned underground vault, industrial, rusty metal walls, exposed pipes,
+    old computer terminals, machinery, emergency lighting, red light, dim lighting,
+    volumetric light, dust particles
+  dungeon cells: >
+    stone dungeon, iron bar cells, chains on walls, torchlight, damp stone,
+    scattered straw, shadows
+  goblin warren: >
+    cramped goblin warren, dirt tunnels, wooden scaffolding, cage stacks,
+    hanging lanterns, bones and loot piles
+  forest clearing: >
+    sunlit forest clearing, tall trees, dappled light, ferns, moss, god rays,
+    shallow stream
+  cozy bedroom: >
+    cozy bedroom, warm lamplight, unmade bed, wooden furniture, plants on windowsill,
+    evening light through curtains
+  ruined cathedral: >
+    ruined gothic cathedral, broken stained glass, shafts of light, rubble,
+    ivy on stone columns, dramatic scale
+  neon alley: >
+    rain-soaked neon alley, cyberpunk city, puddles, reflected signage, steam vents,
+    night, moody lighting
+  tavern interior: >
+    rustic tavern interior, wooden beams, fireplace, tankards, warm candlelight,
+    crowded background
+  laboratory: >
+    sterile laboratory, glass tanks, cables, monitors, cold blue lighting,
+    tiled floor, clinical
+  snowy pass: >
+    snowy mountain pass, wind-blown snow, grey sky, jagged rocks, sparse pines,
+    cold rim light

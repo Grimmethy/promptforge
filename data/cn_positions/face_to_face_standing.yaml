@@ -1,0 +1,8 @@
+name: Face To Face Standing
+people: 2
+tags: hetero, standing, face to face, hug, embrace, kissing
+default_view: front
+views:
+  front:
+    file: face_to_face_standing__front.json
+    tags: ''

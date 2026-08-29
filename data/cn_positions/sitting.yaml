@@ -1,0 +1,11 @@
+name: Sitting
+people: 1
+tags: sitting, on floor, knees up
+default_view: front
+views:
+  front:
+    file: sitting__front.json
+    tags: ''
+  from_side:
+    file: sitting__from_side.json
+    tags: ''
