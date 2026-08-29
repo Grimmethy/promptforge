@@ -241,6 +241,15 @@ def _face_away(text):
                      if t.strip() and t.strip().lower() not in _GAZE_AT_CAMERA)
 
 
+def _frame_has_joints(frame):
+    """True if any person in the frame has at least a few confident keypoints."""
+    for person in frame.get("people", []):
+        flat = person.get("pose_keypoints_2d") or []
+        if sum(1 for i in range(2, len(flat), 3) if flat[i] > 0) >= 4:
+            return True
+    return False
+
+
 def _cat_tags(category, value):
     """A preset key -> its tag string; anything else -> passed through."""
     v = (value or "").strip()
@@ -296,7 +305,7 @@ def resolve_job(spec):
     pos_name = spec.get("pose_position")
     yaw = float(spec.get("yaw", 0.0) or 0.0)
     pitch = float(spec.get("pitch", 0.0) or 0.0)
-    az, el = yaw * 3.141592653589793, pitch * 1.5707963267948966
+    az, el = yaw * 3.141592653589793, pitch * 1.15   # inverse of editor exportYawPitch
     if pos_name:
         _rig, ptags = data.cn_canonical_rig(pos_name)
         pose_tags = data.normalize_kw(ptags, data.orientation_tags(yaw, pitch))
@@ -307,7 +316,9 @@ def resolve_job(spec):
     if sk.get("people"):
         frame = {"people": sk["people"],
                  "canvas_width": j["width"], "canvas_height": j["height"]}
-    if frame is not None:
+    # skip ControlNet entirely if the projected skeleton has no usable joints
+    # (a flat rig seen edge-on) — let the prompt carry the pose
+    if frame is not None and _frame_has_joints(frame):
         frame = pose_ops.transform(frame, canvas_w=j["width"], canvas_h=j["height"])
         j["skeleton_png"] = pose_ops.render_png(frame, j["width"], j["height"])
     j["pose_tags"] = pose_tags

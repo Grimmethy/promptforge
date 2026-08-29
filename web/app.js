@@ -72,16 +72,18 @@ async function comfyStatus() {
 // ------------------------------------------------------------- characters
 const state = { chars: [], yaw: 0, pitch: 0 };
 
+// must match server/core/data.orientation_tags(): yaw>0 => subject faces left
 function yawWord(y) {
   const a = Math.abs(y);
   if (a <= 0.12) return 'front';
-  if (a <= 0.38) return (y < 0 ? '3/4 left' : '3/4 right');
-  if (a <= 0.72) return (y < 0 ? 'left profile' : 'right profile');
-  return 'from behind';
+  if (a >= 0.82) return 'from behind';
+  return (a <= 0.4 ? '¾ ' : 'profile, ') + (y > 0 ? 'facing left' : 'facing right');
 }
 function pitchWord(p) {
-  if (p >= 0.4) return 'high angle';
-  if (p <= -0.4) return 'low angle';
+  if (p >= 0.7) return 'overhead';
+  if (p >= 0.3) return 'high angle';
+  if (p <= -0.7) return "worm's-eye";
+  if (p <= -0.3) return 'low angle';
   return 'eye level';
 }
 function updateOrientLbl() {
@@ -186,7 +188,7 @@ function syncEditor() {
     : (lastLibFrame && (lastLibFrame.rigs || lastLibFrame.rig) ? lastLibFrame : null);
   editor.setCount(n, lib);
   state._rigs = null;
-  editor.setCam(state.yaw * Math.PI, state.pitch * (Math.PI / 2));
+  editor.setCam(state.yaw * Math.PI, state.pitch * 1.15);   // inverse of exportYawPitch
   updateOrientLbl();
   buildEditorTools();
   refreshPoseLib();

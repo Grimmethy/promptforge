@@ -170,15 +170,16 @@ def _rotx(p, a):
     return [p[0], p[1] * c - p[2] * s, p[1] * s + p[2] * c]
 
 
-# orbit camera sits this far down +z (after rotation) and looks toward -z; a
-# mild perspective divide is what actually distinguishes front from back and
-# tells ControlNet which end of a foreshortened pose is nearest.
-CAM_DIST = 1.6
+# orbit camera distance for the perspective divide — smaller = stronger
+# foreshortening, which is what distinguishes front from back and tells
+# ControlNet which end of an axial pose is nearest.
+CAM_DIST = 1.35
 
 
 def project_person(rig, azimuth=0.0, elevation=0.0):
-    """rig -> a COCO-18 person dict (perspective orbit camera). Joints on the
-    far side of the head from the camera drop the nose so a rear view reads."""
+    """rig -> a COCO-18 person dict (perspective orbit camera). Drops the nose
+    when the camera is behind the head; blanks the skeleton entirely if the
+    projection collapses (a flat rig seen edge-on) so the prompt drives."""
     j = rig["joints"]
     rot = {name: _rotx(_roty(p, -azimuth), -elevation) for name, p in j.items()}
     scr = {}
@@ -186,13 +187,22 @@ def project_person(rig, azimuth=0.0, elevation=0.0):
         f = CAM_DIST / max(0.35, CAM_DIST - q[2])
         scr[name] = (min(1.0, max(0.0, 0.5 + q[0] * f)),
                      min(1.0, max(0.0, 0.5 + q[1] * f)))
-    # looking at the back of the head -> hide the face point
+    xs = [s[0] for s in scr.values()]
+    ys = [s[1] for s in scr.values()]
+    zr = [p[2] for p in j.values()]
+    flat_rig = (max(zr) - min(zr)) < 0.08
+    az = ((azimuth + math.pi) % (2 * math.pi)) - math.pi
+    near_back = abs(az) > 2.4
+    # collapsed edge-on, OR a flat rig turned to the back (its mirrored-front
+    # projection would fight the "from behind" tags) -> no skeleton
+    degenerate = ((max(xs) - min(xs) < 0.05) or (max(ys) - min(ys) < 0.05)
+                  or (flat_rig and near_back))
     hide_nose = ("head" in rot and "chest" in rot
                  and rot["head"][2] < rot["chest"][2] - 0.05)
     flat = []
     for i in range(18):
         name = COCO_FROM_RIG.get(i)
-        if name and name in scr and not (i == 0 and hide_nose):
+        if name and name in scr and not degenerate and not (i == 0 and hide_nose):
             flat += [scr[name][0], scr[name][1], 1.0]
         else:
             flat += [0.0, 0.0, 0.0]

@@ -43,7 +43,7 @@ const v = {
 const rotY = (p, a) => { const c = Math.cos(a), s = Math.sin(a); return [p[0] * c + p[2] * s, p[1], -p[0] * s + p[2] * c]; };
 const rotX = (p, a) => { const c = Math.cos(a), s = Math.sin(a); return [p[0], p[1] * c - p[2] * s, p[1] * s + p[2] * c]; };
 const clampLen = (k, x) => { const [lo, hi] = RIG.range[k]; return Math.min(hi, Math.max(lo, x)); };
-const CAM_DIST = 1.6;
+const CAM_DIST = 1.35;
 
 function defaultRig(cx = 0) {
   const L = { ...RIG.defaults };
@@ -143,13 +143,20 @@ class PoseEditor {
   getFrame(w, h) {
     return {
       people: this.rigs.map(r => {
+        const proj = {}; for (const k of RIG.joints) proj[k] = this._project(r.joints[k]);
+        const xs = RIG.joints.map(k => proj[k].x), ys = RIG.joints.map(k => proj[k].y);
+        const zr = RIG.joints.map(k => r.joints[k][2]);
+        const flatRig = Math.max(...zr) - Math.min(...zr) < 0.08;
+        const az = ((this.cam.az + Math.PI) % (2 * Math.PI)) - Math.PI;
+        const degenerate = (Math.max(...xs) - Math.min(...xs) < 0.05) ||
+                           (Math.max(...ys) - Math.min(...ys) < 0.05) ||
+                           (flatRig && Math.abs(az) > 2.4);
+        const hideNose = proj.head.z < proj.chest.z - 0.05;
         const flat = [];
-        const hideNose = this._project(r.joints.head).z < this._project(r.joints.chest).z - 0.05;
         for (let i = 0; i < 18; i++) {
           const name = RIG.coco[i];
-          if (name && r.joints[name] && !(i === 0 && hideNose)) {
-            const s = this._project(r.joints[name]);
-            flat.push(Math.min(1, Math.max(0, s.x)), Math.min(1, Math.max(0, s.y)), 1);
+          if (name && proj[name] && !degenerate && !(i === 0 && hideNose)) {
+            flat.push(Math.min(1, Math.max(0, proj[name].x)), Math.min(1, Math.max(0, proj[name].y)), 1);
           } else flat.push(0, 0, 0);
         }
         return { pose_keypoints_2d: flat, face_keypoints_2d: null, hand_left_keypoints_2d: null, hand_right_keypoints_2d: null };
@@ -181,7 +188,7 @@ class PoseEditor {
   resetView() { this.cam.az = 0; this.cam.el = 0; this.draw(); this._emit(); }
   exportYawPitch() {
     return { yaw: Math.max(-1, Math.min(1, this.cam.az / Math.PI)),
-             pitch: Math.max(-1, Math.min(1, this.cam.el / (Math.PI / 2))) };
+             pitch: Math.max(-1, Math.min(1, this.cam.el / 1.15)) };
   }
 
   // ---------- edits ----------
@@ -256,7 +263,9 @@ class PoseEditor {
       return;
     }
     if (this.drag.kind === 'orbit') {
-      this.orbit((nx - this.drag.x) * Math.PI * 1.4, -(ny - this.drag.y) * Math.PI * 1.1);
+      // "grab and turn": drag right -> subject turns to face right (yaw < 0);
+      // drag up -> we look down from above (high angle)
+      this.orbit(-(nx - this.drag.x) * Math.PI * 1.4, -(ny - this.drag.y) * Math.PI * 1.1);
       this.drag.x = nx; this.drag.y = ny;
       return;
     }

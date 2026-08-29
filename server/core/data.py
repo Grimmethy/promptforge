@@ -298,23 +298,33 @@ def cn_canonical_rig(name):
 
 
 def orientation_tags(yaw=0.0, pitch=0.0):
-    """Camera/facing prompt tags for the orbit camera. yaw & pitch are -1..1
-    (yaw = azimuth/pi, pitch = elevation/(pi/2)); banded on magnitude."""
-    ay = min(1.0, abs(float(yaw or 0.0)))
-    pitch = max(-1.0, min(1.0, float(pitch or 0.0)))
+    """Camera/facing prompt tags for the orbit camera. yaw & pitch are -1..1.
+
+    Sign follows the projection: yaw > 0 turns the subject to face the viewer's
+    left, yaw < 0 to the right; |yaw| -> 1 is the back. These carry the facing
+    when the projected skeleton is ambiguous (an axial pose barely changes
+    silhouette front-to-back), so keep them decisive.
+    """
+    y = max(-1.0, min(1.0, float(yaw or 0.0)))
+    p = max(-1.0, min(1.0, float(pitch or 0.0)))
+    ay = abs(y)
     out = []
     if ay <= 0.12:
         out.append("front view, facing viewer")
-    elif ay <= 0.38:
-        out.append("3/4 view")
-    elif ay <= 0.72:
-        out.append("from side, profile view")
+    elif ay >= 0.82:
+        out.append("from behind, back view, view from behind, facing away")
     else:
-        out.append("from behind, back view, view from behind")
-    if pitch >= 0.4:
-        out.append("from above, high angle, looking down")
-    elif pitch <= -0.4:
-        out.append("from below, low angle, looking up")
+        face = "facing left" if y > 0 else "facing right"
+        if ay <= 0.4:
+            out.append("three-quarter view, " + face)
+        else:
+            out.append("profile view, from the side, " + face)
+    if p >= 0.3:
+        out.append("high angle, from above, looking down"
+                   + (", overhead shot, bird's-eye view" if p >= 0.7 else ""))
+    elif p <= -0.3:
+        out.append("low angle, from below, looking up"
+                   + (", worm's-eye view" if p <= -0.7 else ""))
     return ", ".join(out)
 
 
