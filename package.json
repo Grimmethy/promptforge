@@ -1,0 +1,11 @@
+{
+  "name": "promptforge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone local ComfyUI-driven still-image shot generator. Embedded as an Agent Manager dashboard tab and callable by the pipeline; NOT an agent-manager task-source plugin. register.js is a documented no-op so it can be listed in plugins.json. The app itself is Python (server/) + a static web UI (web/).",
+  "license": "MIT",
+  "main": "register.js",
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}
