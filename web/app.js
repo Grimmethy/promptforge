@@ -164,6 +164,11 @@ function refreshPoseLib() {
   opts.forEach(p => (p.views || ['from_side']).forEach(v =>
     sel.append(el('option', { value: `${p.name}|${v}` }, `${p.name} · ${v}`))));
   if (!opts.length) sel.append(el('option', {}, '(no library poses for ' + n + ')'));
+  // Drop a remembered pose that no longer fits the current character count;
+  // otherwise keep the dropdown pointed at it.
+  const want = state.poseName ? `${state.poseName}|${state.poseView || 'from_side'}` : '';
+  if (want && [...sel.options].some(o => o.value === want)) sel.value = want;
+  else { state.poseName = null; state.poseView = null; }
 }
 
 async function loadPose() {
@@ -172,6 +177,8 @@ async function loadPose() {
   const d = await fetch(`/api/pose/${encodeURIComponent(pos)}/${encodeURIComponent(view)}`).then(r => r.json());
   if (d.error) return toast(d.error);
   lastLibFrame = d.frame;
+  state.poseName = pos;
+  state.poseView = view;
   editor.loadFrame(d.frame);
   buildEditorTools();
 }
@@ -215,6 +222,13 @@ function buildSpec() {
   };
   if (state.chars.length && editor)
     spec.skeleton = { people: editor.getFrame(spec.width, spec.height).people };
+  // Carry the chosen library pose so the backend can add its pose/action words
+  // to the prompt — the edited skeleton only drives ControlNet, which a
+  // voluminous outfit can hide.
+  if (state.poseName) {
+    spec.pose_position = state.poseName;
+    spec.pose_view = state.poseView || 'from_side';
+  }
   return spec;
 }
 
@@ -228,9 +242,10 @@ async function preview() {
     }).then(r => r.json());
     if (r.error) { $('#preview').textContent = 'error: ' + r.error; return; }
     const p = r.prompt_used;
-    $('#preview').textContent = p.positive
+    const pose = r.pose_tags ? `POSE TAGS\n${r.pose_tags}\n\n` : '';
+    $('#preview').textContent = pose + (p.positive
       ? `POSITIVE\n${p.positive}\n\nNEGATIVE\n${p.negative}`
-      : `A (${r.n_chars} chars)\n${p.region_a}\n\nB\n${p.region_b}\n\nBASE\n${p.base}\n\nNEGATIVE\n${p.negative}`;
+      : `A (${r.n_chars} chars)\n${p.region_a}\n\nB\n${p.region_b}\n\nBASE\n${p.base}\n\nNEGATIVE\n${p.negative}`);
   } catch { }
 }
 
@@ -323,6 +338,8 @@ function applySpec(spec) {
   if (spec.setting) $('#settingText').value = spec.setting;
   if (spec.negative) $('#negative').value = spec.negative;
   if (spec.layout) $('#layout').value = spec.layout;
+  state.poseName = spec.pose_position || null;
+  state.poseView = spec.pose_view || null;
   renderChars();
   if (spec.skeleton?.people && editor) { lastLibFrame = { people: spec.skeleton.people }; editor.loadFrame(lastLibFrame); }
   toast('settings restored'); schedulePreview();
@@ -330,7 +347,10 @@ function applySpec(spec) {
 
 function persist() {
   try {
-    localStorage.pf_state = JSON.stringify({ chars: state.chars, form: formValues() });
+    localStorage.pf_state = JSON.stringify({
+      chars: state.chars, form: formValues(),
+      poseName: state.poseName, poseView: state.poseView,
+    });
   } catch { }
 }
 function formValues() {
@@ -343,6 +363,8 @@ function restore() {
     const s = JSON.parse(localStorage.pf_state || '{}');
     if (s.form) for (const [k, v] of Object.entries(s.form)) { const n = $('#' + k); if (n) n.value = v; }
     state.chars = s.chars || [];
+    state.poseName = s.poseName || null;
+    state.poseView = s.poseView || null;
   } catch { state.chars = []; }
 }
 

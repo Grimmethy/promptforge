@@ -252,23 +252,35 @@ def resolve_job(spec):
             char_negs.append(neg)
 
     # pose / skeleton
+    #
+    # Two independent things come out of the pose section:
+    #   - `frame`: the COCO-18 keypoints that become the ControlNet skeleton PNG
+    #   - `pose_tags`: pose/action words that go into the *prompt*
+    # The editor sends `skeleton.people` (its live, possibly hand-edited frame),
+    # but the descriptive tags only exist on the library position. Derive the
+    # tags from `pose_position` whenever it is given — even alongside an edited
+    # skeleton — so the prompt still says "kneeling" etc. Without this, pose is
+    # 100% on the ControlNet image, which a voluminous outfit (Cindy's dresses)
+    # visually hides, so every pose renders the same.
     pose_tags = ""
     frame = None
     sk = spec.get("skeleton") or {}
+    pos_name = spec.get("pose_position")
+    pose_view = spec.get("pose_view") or "from_side"
+    if pos_name:
+        lib_path, vtags = data.cn_view_skeleton(pos_name, pose_view)
+        pdoc = data.get_cn_position(pos_name)
+        pose_tags = data.normalize_kw(pdoc.get("tags", ""), vtags,
+                                      data.load_view_tags().get(spec.get("pose_view", ""), ""))
+        if not sk.get("people") and lib_path:
+            frame = pose_ops.load_json(lib_path)
     if sk.get("people"):
         frame = {"people": sk["people"],
                  "canvas_width": j["width"], "canvas_height": j["height"]}
-    elif spec.get("pose_position"):
-        path, vtags = data.cn_view_skeleton(spec["pose_position"],
-                                            spec.get("pose_view", "from_side"))
-        if path:
-            frame = pose_ops.load_json(path)
-        pdoc = data.get_cn_position(spec["pose_position"])
-        pose_tags = data.normalize_kw(pdoc.get("tags", ""), vtags,
-                                      data.load_view_tags().get(spec.get("pose_view", ""), ""))
     if frame is not None:
         frame = pose_ops.transform(frame, canvas_w=j["width"], canvas_h=j["height"])
         j["skeleton_png"] = pose_ops.render_png(frame, j["width"], j["height"])
+    j["pose_tags"] = pose_tags
 
     j["negative"] = data.normalize_kw(
         (spec.get("negative") or "").strip(), *char_negs, th["negative_add"],
@@ -297,7 +309,8 @@ def preview():
         job = resolve_job(spec)
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": str(exc)}), 400
-    return jsonify({"prompt_used": job["prompt_used"], "n_chars": job["n_chars"]})
+    return jsonify({"prompt_used": job["prompt_used"], "n_chars": job["n_chars"],
+                    "pose_tags": job.get("pose_tags", "")})
 
 
 @app.route("/api/generate", methods=["POST"])

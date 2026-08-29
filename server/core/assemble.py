@@ -78,6 +78,8 @@ def assemble(spec):
 
     chunks = []
 
+    pose_tags = (spec.get("pose_tags") or "").strip()
+
     head = []
     if quality and quality_text:
         head.append(quality_text)
@@ -85,6 +87,12 @@ def assemble(spec):
         head.append(manual_prefix)
     if char_segs and char_segs[0]:
         head.append(char_segs[0])
+    # With exactly one character, keep the pose words in the same BREAK chunk as
+    # the subject so they bind to it (later chunks carry less weight). With two
+    # characters the pose is shared scene context and stays in the scene chunk.
+    single_char_pose = pose_tags if len(char_segs) == 1 else ""
+    if single_char_pose:
+        head.append(single_char_pose)
     if head:
         chunks.append(", ".join(head))
 
@@ -93,7 +101,8 @@ def assemble(spec):
             chunks.append(seg)
 
     scene = [s for s in (
-        spec.get("pose_tags"), spec.get("position_tags"), spec.get("scene_tags"),
+        ("" if single_char_pose else pose_tags),
+        spec.get("position_tags"), spec.get("scene_tags"),
     ) if s and str(s).strip()]
     if scene:
         if group_scene:
