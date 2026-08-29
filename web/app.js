@@ -100,7 +100,7 @@ function charCard(c, i) {
     body.push(nameSel, el('div', { class: 'grid2' }, [
       el('div', {}, [el('label', {}, 'Outfit'), outSel]),
       el('div', {}, [el('label', {}, 'Expression'), expSel]),
-    ]));
+    ]), presetEditor(c.name));
   } else if (c.source === 'secondbrain') {
     const names = PRESETS.characters.secondbrain.map(p => p.name);
     if (!names.length) body.push(el('div', { class: 'muted' }, 'No SECOND_BRAIN_DIR/Characters/*.md found.'));
@@ -114,11 +114,44 @@ function charCard(c, i) {
     ta.value = c.text; body.push(ta);
   }
 
+  // the exact text this character injects into the prompt (filled by preview())
+  body.push(el('label', {}, 'injected prompt'),
+            el('div', { class: 'inject', id: 'inj' + i }, state._segs?.[i]?.segment || '…'));
+
   const w = el('input', { type: 'range', min: 0.5, max: 1.6, step: 0.05, value: c.weight, oninput: e => { c.weight = +e.target.value; wl.textContent = 'weight ' + c.weight.toFixed(2); }, onchange: schedulePreview });
   const wl = el('label', {}, 'weight ' + (+c.weight).toFixed(2));
   body.push(wl, w);
 
   return el('div', { class: 'card' }, [hd, ...body]);
+}
+
+// collapsible raw-YAML editor for a preset character; saves back to data/characters/
+function presetEditor(name) {
+  const ta = el('textarea', { class: 'yaml', rows: 14, spellcheck: 'false', placeholder: 'loading…' });
+  const load = async () => {
+    const d = await fetch(`/api/character/preset/${encodeURIComponent(name)}?raw=1`).then(r => r.json());
+    ta.value = d.yaml ?? ('# ' + (d.error || 'not found'));
+  };
+  const save = async () => {
+    const r = await fetch('/api/save-character', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: name, spec_yaml: ta.value }),
+    }).then(r => r.json());
+    if (r.error) return toast(r.error);
+    toast('preset saved → ' + r.saved.split('/').pop());
+    PRESETS = await fetch('/api/presets').then(r => r.json());
+    renderChars(); schedulePreview();
+  };
+  const det = el('details', { class: 'presetEd' }, [
+    el('summary', {}, '✎ edit preset'),
+    ta,
+    el('div', { class: 'row' }, [
+      el('button', { class: 'small', onclick: save }, 'Save'),
+      el('button', { class: 'small', onclick: load }, 'Reload'),
+    ]),
+  ]);
+  det.addEventListener('toggle', () => { if (det.open && !ta.value) load(); });
+  return det;
 }
 
 // ------------------------------------------------------------- skeleton
@@ -241,6 +274,8 @@ async function preview() {
       body: JSON.stringify(buildSpec()),
     }).then(r => r.json());
     if (r.error) { $('#preview').textContent = 'error: ' + r.error; return; }
+    state._segs = r.char_segments || [];
+    state._segs.forEach((s, i) => { const n = $('#inj' + i); if (n) n.textContent = s.segment || '(empty)'; });
     const p = r.prompt_used;
     const pose = r.pose_tags ? `POSE TAGS\n${r.pose_tags}\n\n` : '';
     $('#preview').textContent = pose + (p.positive

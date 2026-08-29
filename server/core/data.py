@@ -121,6 +121,18 @@ def get_character(name):
     return _load_yaml(_char_path(name))
 
 
+def raw_character(name):
+    """Return the character YAML file's exact text (for the preset editor)."""
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", os.path.splitext(str(name))[0]).strip("_")
+    if not safe:
+        raise ValueError("empty name")
+    path = _char_path(safe)
+    if not os.path.isfile(path):
+        raise FileNotFoundError(name)
+    with open(path, "r", encoding="utf-8") as fh:
+        return fh.read()
+
+
 def character_outfits(name):
     outfits = get_character(name).get("outfits") or {}
     keys = list(outfits.keys())

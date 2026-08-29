@@ -56,6 +56,14 @@ details > summary { cursor: pointer; font-size: 11px; text-transform: uppercase;
                     letter-spacing: .06em; color: var(--muted); }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 
+.card .inject { white-space: pre-wrap; word-break: break-word;
+                background: var(--bg); border: 1px solid var(--border); border-radius: 5px;
+                padding: 6px 7px; font-size: 11px; line-height: 1.45; color: var(--muted);
+                max-height: 120px; overflow: auto; margin-bottom: 4px; }
+details.presetEd { margin: 8px 0 4px; padding: 6px 8px; }
+details.presetEd textarea.yaml { width: 100%; margin: 6px 0; font: 11px/1.4 ui-monospace, monospace;
+                                 white-space: pre; overflow-wrap: normal; }
+
 #preview { white-space: pre-wrap; background: var(--panel); border: 1px solid var(--border);
            border-radius: 6px; padding: 8px; font-size: 11px; max-height: 180px; overflow: auto; }
 

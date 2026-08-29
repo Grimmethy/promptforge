@@ -121,6 +121,13 @@ def character(source, name):
     if source == "secondbrain":
         c = secondbrain.get_character(name)
         return (jsonify(c), 200) if c else (jsonify({"error": "not found"}), 404)
+    if request.args.get("raw"):
+        try:
+            return jsonify({"name": name, "yaml": data.raw_character(name)})
+        except FileNotFoundError:
+            return jsonify({"error": "not found"}), 404
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
     doc = data.get_character(name)
     return (jsonify(doc), 200) if doc else (jsonify({"error": "not found"}), 404)
 
@@ -250,6 +257,9 @@ def resolve_job(spec):
         char_segs.append(seg)
         if neg:
             char_negs.append(neg)
+    # per-character injected text, in card order — surfaced in /api/preview so
+    # each character card can show exactly what it contributes to the prompt
+    j["char_segments"] = [{"segment": s} for s in char_segs]
 
     # pose / skeleton
     #
@@ -310,7 +320,8 @@ def preview():
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": str(exc)}), 400
     return jsonify({"prompt_used": job["prompt_used"], "n_chars": job["n_chars"],
-                    "pose_tags": job.get("pose_tags", "")})
+                    "pose_tags": job.get("pose_tags", ""),
+                    "char_segments": job.get("char_segments", [])})
 
 
 @app.route("/api/generate", methods=["POST"])
