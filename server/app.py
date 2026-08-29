@@ -228,6 +228,19 @@ _DEFAULTS = dict(cfg=6.0, steps=30, sampler="dpmpp_2m_sde", scheduler="karras",
                  cn_strength=0.9, cn_end=0.8, layout="side by side - A left")
 
 
+_GAZE_AT_CAMERA = {
+    "looking at viewer", "looking at camera", "looking at another", "eye contact",
+    "facing viewer", "facing the viewer", "front view", "front view, facing viewer",
+    "looking back", "looking back at viewer",
+}
+
+
+def _face_away(text):
+    """Drop gaze-toward-camera tokens (used when the camera is behind)."""
+    return ", ".join(t.strip() for t in str(text).split(",")
+                     if t.strip() and t.strip().lower() not in _GAZE_AT_CAMERA)
+
+
 def _cat_tags(category, value):
     """A preset key -> its tag string; anything else -> passed through."""
     v = (value or "").strip()
@@ -299,6 +312,16 @@ def resolve_job(spec):
         j["skeleton_png"] = pose_ops.render_png(frame, j["width"], j["height"])
     j["pose_tags"] = pose_tags
 
+    # A rear/near-rear camera contradicts any "looking at viewer" gaze the
+    # character preset carries — drop those tokens and assert the turn-away so
+    # the model doesn't split the difference and render the face anyway.
+    rear = abs(yaw) > 0.55
+    if rear:
+        char_segs = [_face_away(s) for s in char_segs]
+        pose_tags = data.normalize_kw(pose_tags, "facing away, back turned to viewer")
+        j["pose_tags"] = pose_tags
+        j["char_segments"] = [{"segment": s} for s in char_segs]
+
     j["negative"] = data.normalize_kw(
         (spec.get("negative") or "").strip(), *char_negs, th["negative_add"],
         assemble.DEFAULT_NEGATIVE)
@@ -311,7 +334,8 @@ def resolve_job(spec):
                             "base": j["base"], "negative": j["negative"]}
     else:
         built = assemble.assemble({
-            "characters": chars, "scene_tags": scene_tags, "pose_tags": pose_tags})
+            "characters": chars, "scene_tags": scene_tags, "pose_tags": pose_tags,
+            "char_segments": char_segs})
         j["positive"] = built["positive"]
         j["prompt_used"] = {"positive": j["positive"], "negative": j["negative"]}
 

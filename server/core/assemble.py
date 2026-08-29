@@ -75,6 +75,11 @@ def assemble(spec):
         char_segs.append(seg)
         if neg:
             char_negs.append(neg)
+    # caller may hand us already-processed segments (e.g. gaze stripped for a
+    # rear camera) — use them for the positive, keep the negatives above
+    override = spec.get("char_segments")
+    if override is not None:
+        char_segs = [str(s) for s in override][:2]
 
     chunks = []
 

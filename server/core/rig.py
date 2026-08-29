@@ -170,17 +170,29 @@ def _rotx(p, a):
     return [p[0], p[1] * c - p[2] * s, p[1] * s + p[2] * c]
 
 
+# orbit camera sits this far down +z (after rotation) and looks toward -z; a
+# mild perspective divide is what actually distinguishes front from back and
+# tells ControlNet which end of a foreshortened pose is nearest.
+CAM_DIST = 1.6
+
+
 def project_person(rig, azimuth=0.0, elevation=0.0):
-    """rig -> a COCO-18 person dict (orthographic orbit camera)."""
+    """rig -> a COCO-18 person dict (perspective orbit camera). Joints on the
+    far side of the head from the camera drop the nose so a rear view reads."""
     j = rig["joints"]
+    rot = {name: _rotx(_roty(p, -azimuth), -elevation) for name, p in j.items()}
     scr = {}
-    for name, p in j.items():
-        q = _rotx(_roty(p, -azimuth), -elevation)
-        scr[name] = (min(1.0, max(0.0, 0.5 + q[0])), min(1.0, max(0.0, 0.5 + q[1])))
+    for name, q in rot.items():
+        f = CAM_DIST / max(0.35, CAM_DIST - q[2])
+        scr[name] = (min(1.0, max(0.0, 0.5 + q[0] * f)),
+                     min(1.0, max(0.0, 0.5 + q[1] * f)))
+    # looking at the back of the head -> hide the face point
+    hide_nose = ("head" in rot and "chest" in rot
+                 and rot["head"][2] < rot["chest"][2] - 0.05)
     flat = []
     for i in range(18):
         name = COCO_FROM_RIG.get(i)
-        if name and name in scr:
+        if name and name in scr and not (i == 0 and hide_nose):
             flat += [scr[name][0], scr[name][1], 1.0]
         else:
             flat += [0.0, 0.0, 0.0]

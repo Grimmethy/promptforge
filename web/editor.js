@@ -43,6 +43,7 @@ const v = {
 const rotY = (p, a) => { const c = Math.cos(a), s = Math.sin(a); return [p[0] * c + p[2] * s, p[1], -p[0] * s + p[2] * c]; };
 const rotX = (p, a) => { const c = Math.cos(a), s = Math.sin(a); return [p[0], p[1] * c - p[2] * s, p[1] * s + p[2] * c]; };
 const clampLen = (k, x) => { const [lo, hi] = RIG.range[k]; return Math.min(hi, Math.max(lo, x)); };
+const CAM_DIST = 1.6;
 
 function defaultRig(cx = 0) {
   const L = { ...RIG.defaults };
@@ -143,9 +144,10 @@ class PoseEditor {
     return {
       people: this.rigs.map(r => {
         const flat = [];
+        const hideNose = this._project(r.joints.head).z < this._project(r.joints.chest).z - 0.05;
         for (let i = 0; i < 18; i++) {
           const name = RIG.coco[i];
-          if (name && r.joints[name]) {
+          if (name && r.joints[name] && !(i === 0 && hideNose)) {
             const s = this._project(r.joints[name]);
             flat.push(Math.min(1, Math.max(0, s.x)), Math.min(1, Math.max(0, s.y)), 1);
           } else flat.push(0, 0, 0);
@@ -156,13 +158,16 @@ class PoseEditor {
     };
   }
 
-  // ---------- camera ----------
+  // ---------- camera ----------  (mild perspective — matches server/core/rig.py)
+  _persp(qz) { return CAM_DIST / Math.max(0.35, CAM_DIST - qz); }
   _project(p) {
     const q = rotX(rotY(p, -this.cam.az), -this.cam.el);
-    return { x: 0.5 + q[0] * this.cam.zoom, y: 0.5 + q[1] * this.cam.zoom, z: q[2] };
+    const f = this._persp(q[2]) * this.cam.zoom;
+    return { x: 0.5 + q[0] * f, y: 0.5 + q[1] * f, z: q[2] };
   }
   _unproject(sx, sy, depth) {
-    const q = [(sx - 0.5) / this.cam.zoom, (sy - 0.5) / this.cam.zoom, depth];
+    const f = this._persp(depth) * this.cam.zoom;
+    const q = [(sx - 0.5) / f, (sy - 0.5) / f, depth];
     return rotY(rotX(q, this.cam.el), this.cam.az);
   }
   orbit(daz, del) {
