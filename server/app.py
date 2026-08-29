@@ -11,7 +11,7 @@ import urllib.request
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from core import assemble, comfy, data, pose_ops, randomizer, secondbrain, themes
+from core import assemble, comfy, data, pose_ops, randomizer, rig, secondbrain, themes
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(os.path.dirname(_HERE), "web")
@@ -137,10 +137,16 @@ def theme(name):
 
 @app.route("/api/pose/<path:position>")
 def pose_frame(position):
-    path, tags = data.cn_canonical_skeleton(position)
-    if not path:
+    r, tags = data.cn_canonical_rig(position)
+    if r is None:
         return jsonify({"error": "no skeleton for that position"}), 404
-    return jsonify({"frame": pose_ops.load_json(path), "tags": tags})
+    key = "rigs" if isinstance(r, list) else "rig"
+    return jsonify({key: r, "tags": tags})
+
+
+def _azel(b):
+    return float(b.get("yaw", 0.0) or 0.0) * 3.141592653589793, \
+        float(b.get("pitch", 0.0) or 0.0) * 1.5707963267948966
 
 
 @app.route("/api/pose/render", methods=["POST"])
@@ -148,20 +154,21 @@ def pose_render():
     b = request.get_json(force=True, silent=True) or {}
     w = int(b.get("w", 1152))
     h = int(b.get("h", 896))
+    az, el = _azel(b)
     frame = b.get("keypoints")
+    if frame is None and (b.get("rig") or b.get("rigs")):
+        frame = rig.project_frame(b.get("rigs") or b.get("rig"), az, el, w, h)
     if frame is None and b.get("position"):
-        path, _ = data.cn_canonical_skeleton(b["position"])
-        if not path:
+        r, _ = data.cn_canonical_rig(b["position"])
+        if r is None:
             return jsonify({"error": "unknown position"}), 404
-        frame = pose_ops.load_json(path)
+        frame = rig.project_frame(r, az, el, w, h)
     if frame is None:
-        return jsonify({"error": "keypoints or position required"}), 400
+        return jsonify({"error": "keypoints, rig or position required"}), 400
     frame = pose_ops.transform(
         frame,
         mirror_h=bool(b.get("mirror")), scale=float(b.get("scale", 1.0)),
         offset_x=float(b.get("offset_x", 0.0)), offset_y=float(b.get("offset_y", 0.0)),
-        dutch_deg=float(b.get("dutch_angle", 0.0)),
-        yaw=float(b.get("yaw", 0.0)), pitch=float(b.get("pitch", 0.0)),
         canvas_w=w, canvas_h=h,
     )
     png = pose_ops.render_png(frame, w, h,
@@ -175,9 +182,10 @@ def save_pose():
     b = request.get_json(force=True, silent=True) or {}
     try:
         path = data.save_cn_pose(
-            b["position"], b["keypoints"],
-            b.get("position_tags", ""), int(b.get("people", 1)),
-            bool(b.get("update_yaml", True)), bool(b.get("overwrite", False)))
+            b["position"], rig=b.get("rig"), rigs=b.get("rigs"),
+            position_tags=b.get("position_tags", ""), people=int(b.get("people", 1)),
+            update_yaml=bool(b.get("update_yaml", True)),
+            overwrite=bool(b.get("overwrite", False)))
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": str(exc)}), 400
     return jsonify({"saved": path})
@@ -261,34 +269,33 @@ def resolve_job(spec):
 
     # pose / skeleton
     #
-    # Two independent things come out of the pose section:
-    #   - `frame`: the COCO-18 keypoints that become the ControlNet skeleton PNG
-    #   - `pose_tags`: pose/action words that go into the *prompt*
-    # The editor sends `skeleton.people` (its live, possibly hand-edited frame),
-    # but the descriptive tags only exist on the library position. Derive the
-    # tags from `pose_position` whenever it is given — even alongside an edited
-    # skeleton — so the prompt still says "kneeling" etc. Without this, pose is
-    # 100% on the ControlNet image, which a voluminous outfit (Cindy's dresses)
-    # visually hides, so every pose renders the same.
+    # Two independent things come out of here:
+    #   - `frame`: COCO-18 keypoints that become the ControlNet skeleton PNG
+    #   - `pose_tags`: pose/action + camera words that go into the *prompt*
+    # The editor projects its live 3-D rig through the orbit camera and sends
+    # the result as `skeleton.people` (already oriented — do not re-project it).
+    # An API caller may instead pass only `pose_position` (+ yaw/pitch); then we
+    # load the stored rig and project it here. Camera tags are derived from
+    # yaw/pitch either way so a hidden pose still reads in the prompt.
     pose_tags = ""
     frame = None
     sk = spec.get("skeleton") or {}
     pos_name = spec.get("pose_position")
     yaw = float(spec.get("yaw", 0.0) or 0.0)
     pitch = float(spec.get("pitch", 0.0) or 0.0)
+    az, el = yaw * 3.141592653589793, pitch * 1.5707963267948966
     if pos_name:
-        lib_path, ptags = data.cn_canonical_skeleton(pos_name)
+        _rig, ptags = data.cn_canonical_rig(pos_name)
         pose_tags = data.normalize_kw(ptags, data.orientation_tags(yaw, pitch))
-        if not sk.get("people") and lib_path:
-            frame = pose_ops.load_json(lib_path)
+        if not sk.get("people") and _rig is not None:
+            frame = rig.project_frame(_rig, az, el, j["width"], j["height"])
     elif yaw or pitch:
         pose_tags = data.orientation_tags(yaw, pitch)
     if sk.get("people"):
         frame = {"people": sk["people"],
                  "canvas_width": j["width"], "canvas_height": j["height"]}
     if frame is not None:
-        frame = pose_ops.transform(frame, yaw=yaw, pitch=pitch,
-                                   canvas_w=j["width"], canvas_h=j["height"])
+        frame = pose_ops.transform(frame, canvas_w=j["width"], canvas_h=j["height"])
         j["skeleton_png"] = pose_ops.render_png(frame, j["width"], j["height"])
     j["pose_tags"] = pose_tags
 

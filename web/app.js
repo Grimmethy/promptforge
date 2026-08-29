@@ -27,20 +27,16 @@ async function boot() {
   fillSelect('#model', PRESETS.checkpoints.length ? PRESETS.checkpoints : ['(ComfyUI down)']);
   refreshPoseLib();
 
-  editor = new PoseEditor($('#poseCanvas'), () => { schedulePreview(); });
+  editor = new PoseEditor($('#poseCanvas'), () => {
+    const o = editor.exportYawPitch();
+    state.yaw = o.yaw; state.pitch = o.pitch;
+    updateOrientLbl(); persist(); schedulePreview();
+  });
 
   $('#addChar').onclick = () => { if (state.chars.length < 2) { state.chars.push(blankChar()); renderChars(); } };
   $('#poseLoad').onclick = loadPose;
   $('#poseSave').onclick = savePose;
-  const onOrient = () => {
-    state.yaw = +$('#yawSlider').value; state.pitch = +$('#pitchSlider').value;
-    editor.setOrient(state.yaw, state.pitch); updateOrientLbl(); persist(); schedulePreview();
-  };
-  $('#yawSlider').addEventListener('input', onOrient);
-  $('#pitchSlider').addEventListener('input', onOrient);
-  $('#orientReset').onclick = () => {
-    $('#yawSlider').value = 0; $('#pitchSlider').value = 0; onOrient();
-  };
+  $('#orientReset').onclick = () => editor.resetView();
   $('#generate').onclick = generate;
   $('#reroll').onclick = () => { $('#seed').value = -1; generate(); };
   $$('#inputs select, #inputs input, #inputs textarea').forEach(n => n.addEventListener('change', () => { persist(); schedulePreview(); }));
@@ -77,11 +73,11 @@ async function comfyStatus() {
 const state = { chars: [], yaw: 0, pitch: 0 };
 
 function yawWord(y) {
-  if (y <= -0.55) return 'left profile';
-  if (y < -0.15) return '3/4 left';
-  if (y < 0.15) return 'front';
-  if (y < 0.55) return '3/4 from behind';
-  return 'facing away';
+  const a = Math.abs(y);
+  if (a <= 0.12) return 'front';
+  if (a <= 0.38) return (y < 0 ? '3/4 left' : '3/4 right');
+  if (a <= 0.72) return (y < 0 ? 'left profile' : 'right profile');
+  return 'from behind';
 }
 function pitchWord(p) {
   if (p >= 0.4) return 'high angle';
@@ -186,9 +182,11 @@ function syncEditor() {
   const n = state.chars.length;
   $('#editorSection').style.display = n ? '' : 'none';
   if (!n || !editor) return;
-  editor.setCount(n, lastLibFrame && lastLibFrame.people?.length === n ? lastLibFrame : null);
-  $('#yawSlider').value = state.yaw; $('#pitchSlider').value = state.pitch;
-  editor.setOrient(state.yaw, state.pitch);
+  const lib = (state._rigs && state._rigs.length === n) ? { rigs: state._rigs }
+    : (lastLibFrame && (lastLibFrame.rigs || lastLibFrame.rig) ? lastLibFrame : null);
+  editor.setCount(n, lib);
+  state._rigs = null;
+  editor.setCam(state.yaw * Math.PI, state.pitch * (Math.PI / 2));
   updateOrientLbl();
   buildEditorTools();
   refreshPoseLib();
@@ -199,24 +197,30 @@ function buildEditorTools() {
   wrap.append(el('div', { class: 'undoredo' }, [
     el('button', { class: 'small', onclick: () => editor.undo() }, '↶ undo'),
     el('button', { class: 'small', onclick: () => editor.redo() }, '↷ redo'),
-    el('span', { class: 'muted', style: 'font-size:10px;align-self:center' }, 'drag joints · right-click a joint to toggle'),
+    el('span', { class: 'muted', style: 'font-size:10px;align-self:center' }, 'drag a joint to pose · hands/feet use IK'),
   ]));
-  const aspect = (+$('#width').value) / (+$('#height').value);
-  editor.figures.forEach((_, fi) => {
-    wrap.append(el('div', { class: 'fig' }, [
-      el('div', { class: 'muted', style: 'font-size:10px' }, (fi === 0 ? 'Figure A' : 'Figure B')),
+  editor.rigs.forEach((r, fi) => {
+    const rows = [
       el('div', { class: 'row' }, [
+        el('span', { class: 'muted', style: 'font-size:10px;flex:1' }, editor.rigs.length > 1 ? (fi === 0 ? 'Figure A' : 'Figure B') : 'Bone lengths'),
         el('button', { class: 'small', onclick: () => editor.mirror(fi) }, '⇋ mirror'),
-        el('button', { class: 'small', onclick: () => editor.nudge(fi, -0.03, 0) }, '←'),
-        el('button', { class: 'small', onclick: () => editor.nudge(fi, 0.03, 0) }, '→'),
-        el('button', { class: 'small', onclick: () => editor.nudge(fi, 0, -0.03) }, '↑'),
-        el('button', { class: 'small', onclick: () => editor.nudge(fi, 0, 0.03) }, '↓'),
       ]),
-      el('label', {}, 'scale'),
-      el('input', { type: 'range', min: 0.6, max: 1.5, step: 0.02, value: 1, onchange: e => { editor.scale(fi, +e.target.value); e.target.value = 1; } }),
-      el('label', {}, 'dutch'),
-      el('input', { type: 'range', min: -30, max: 30, step: 1, value: 0, onchange: e => { editor.dutch(fi, +e.target.value, aspect); e.target.value = 0; } }),
-    ]));
+      el('div', { class: 'lenrow' }, [
+        el('label', {}, 'overall'),
+        el('input', { type: 'range', min: 0.6, max: 1.5, step: 0.02, value: 1, onchange: e => { editor.scaleRig(fi, +e.target.value); e.target.value = 1; } }),
+      ]),
+    ];
+    for (const key of RIG.lengthKeys) {
+      const [lo, hi] = RIG.range[key];
+      rows.push(el('div', { class: 'lenrow' }, [
+        el('label', {}, RIG.bonePretty[key]),
+        el('input', {
+          type: 'range', min: lo, max: hi, step: 0.005, value: r.lengths[key],
+          oninput: e => editor.setLength(fi, key, +e.target.value),
+        }),
+      ]));
+    }
+    wrap.append(el('div', { class: 'fig' }, rows));
   });
 }
 
@@ -236,9 +240,9 @@ async function loadPose() {
   if (!pos) return;
   const d = await fetch(`/api/pose/${encodeURIComponent(pos)}`).then(r => r.json());
   if (d.error) return toast(d.error);
-  lastLibFrame = d.frame;
+  lastLibFrame = d;                 // {rig} | {rigs}
   state.poseName = pos;
-  editor.loadFrame(d.frame);
+  editor.loadRig(d);
   buildEditorTools();
 }
 
@@ -247,12 +251,12 @@ async function savePose() {
     state.poseName || 'my_pose');
   if (!name) return;
   const tags = prompt('Pose tags for the prompt (e.g. "kneeling, hands on thighs"):', '') || '';
+  const rigs = editor.getRigs();
+  const body = { position: name, position_tags: tags, people: rigs.length, overwrite: true };
+  if (rigs.length > 1) body.rigs = rigs; else body.rig = rigs[0];
   const r = await fetch('/api/save-pose', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      position: name, position_tags: tags, people: editor.figures.length, overwrite: true,
-      keypoints: editor.getFrame(+$('#width').value, +$('#height').value),
-    }),
+    body: JSON.stringify(body),
   }).then(r => r.json());
   if (r.error) return toast(r.error);
   toast('saved → ' + r.saved.split('/').pop());
@@ -280,13 +284,14 @@ function buildSpec() {
     cn_strength: +$('#cn_strength').value, cn_end: +$('#cn_end').value,
     layout: $('#layout').value,
   };
-  if (state.chars.length && editor)
+  if (state.chars.length && editor) {
+    // the editor already projected its 3-D rig through the orbit camera
     spec.skeleton = { people: editor.getFrame(spec.width, spec.height).people };
-  // Carry the chosen library pose so the backend can add its pose/action words
-  // to the prompt — the edited skeleton only drives ControlNet, which a
-  // voluminous outfit can hide.
+    spec.pose_rigs = editor.getRigs();   // so a re-used image restores the rig
+  }
+  // carry the pose name for its prompt tags even when an edited skeleton is sent
   if (state.poseName) spec.pose_position = state.poseName;
-  // facing sliders: procedural yaw/pitch, applied to the skeleton + as camera tags
+  // orbit camera -> exported facing (skeleton is pre-oriented; these drive tags)
   if (state.yaw) spec.yaw = state.yaw;
   if (state.pitch) spec.pitch = state.pitch;
   return spec;
@@ -361,7 +366,11 @@ function imgTile(file, item) {
   const menu = el('div', { class: 'menu row' }, [
     mBtn('♻', 'reuse settings', () => { if (m.spec) applySpec(m.spec); }),
     mBtn('⧉', 'copy prompt', () => { navigator.clipboard.writeText(JSON.stringify(m.prompt_used || {}, null, 1)); toast('prompt copied'); }),
-    mBtn('🦴', 'send pose to editor', () => { const sk = m.spec?.skeleton; if (sk?.people && editor) { editor.loadFrame({ people: sk.people }); toast('pose loaded'); } }),
+    mBtn('🦴', 'send pose to editor', () => {
+      const rigs = m.spec?.pose_rigs;
+      if (rigs?.length && editor) { editor.loadRig({ rigs }); toast('pose loaded'); }
+      else toast('no rig saved for this image');
+    }),
     mBtn('⬇', 'download', () => { const a = el('a', { href: '/api/image/' + file, download: file }); a.click(); }),
     mBtn('🗑', 'delete', async () => { await fetch('/api/image/' + file, { method: 'DELETE' }); tile.remove(); }),
   ]);
@@ -403,8 +412,8 @@ function applySpec(spec) {
   state.poseName = spec.pose_position || null;
   state.yaw = spec.yaw || 0;
   state.pitch = spec.pitch || 0;
-  renderChars();
-  if (spec.skeleton?.people && editor) { lastLibFrame = { people: spec.skeleton.people }; editor.loadFrame(lastLibFrame); }
+  state._rigs = (spec.pose_rigs && spec.pose_rigs.length) ? spec.pose_rigs : null;
+  renderChars();   // syncEditor() picks up state._rigs + camera
   toast('settings restored'); schedulePreview();
 }
 
@@ -413,6 +422,7 @@ function persist() {
     localStorage.pf_state = JSON.stringify({
       chars: state.chars, form: formValues(),
       poseName: state.poseName, yaw: state.yaw, pitch: state.pitch,
+      rigs: editor ? editor.getRigs() : null,
     });
   } catch { }
 }
@@ -429,6 +439,7 @@ function restore() {
     state.poseName = s.poseName || null;
     state.yaw = s.yaw || 0;
     state.pitch = s.pitch || 0;
+    state._rigs = (s.rigs && s.rigs.length) ? s.rigs : null;
   } catch { state.chars = []; }
 }
 

@@ -61,9 +61,13 @@ Story generation and video generation are **separate future plugins** — see
 - UI (`web/`): character cards (0–2, +Add / remove, preset·SB·custom source),
   theme / setting / style, model + advanced, live prompt preview, image grid
   with per-tile menu + lightbox, localStorage persistence.
-- Editor (`web/editor.js`): COCO-18 canvas, one draggable figure per character,
-  right-click toggle, per-figure mirror / scale / dutch / nudge, undo/redo,
-  load / save library pose.
+- Editor (`web/editor.js` + `server/core/rig.py`): a named 3-D stick rig per
+  character (head / chest / shoulders / elbows / hands / waist / hips / knees /
+  feet), editable per-bone rest lengths, FABRIK IK on the four limbs, hover
+  tooltips. Drag empty space to orbit — the orbit camera is the exported facing
+  (yaw = azimuth/π, pitch = elevation/(π/2)) and drives the camera prompt tags.
+  Poses are stored as rigs (`cn_positions/keypoints/<pos>.json`) and projected
+  to COCO-18 for ControlNet on both client and server.
 - Browser QA done via headless CDP (page render, add-character, pose load,
   full Generate → gallery loop; no JS errors).
 

@@ -272,7 +272,7 @@ def cn_view_skeleton(name, view=None):
 
 def cn_canonical_skeleton(name):
     """Return (abs_json_path_or_None, pose_tags) for a position's single stored
-    skeleton. Facing is no longer baked in — the yaw/pitch sliders synthesise it.
+    skeleton file. Facing is not baked in — the orbit camera synthesises it.
     Falls back to the old `views:`/`default_view:` shape."""
     pos = get_cn_position(name)
     fname = pos.get("skeleton")
@@ -284,24 +284,33 @@ def cn_canonical_skeleton(name):
     return path, str(pos.get("tags", ""))
 
 
-_YAW_TAGS = [
-    (-1.01, -0.55, "from side, profile view"),
-    (-0.55, -0.15, "3/4 view, turned to the side"),
-    (-0.15, 0.15, "front view, facing viewer"),
-    (0.15, 0.55, "3/4 view from behind"),
-    (0.55, 1.01, "from behind, back view, view from behind"),
-]
+def cn_canonical_rig(name):
+    """Return (rig_or_[rig,rig]_or_None, pose_tags). Reads the stored pose doc
+    (3-D rig; legacy COCO-18 frames are lifted by rig.to_rigs)."""
+    from . import rig as rigmod
+    path, tags = cn_canonical_skeleton(name)
+    if not path:
+        return None, tags
+    with open(path, "r", encoding="utf-8") as fh:
+        doc = json.load(fh)
+    rigs = rigmod.to_rigs(doc)
+    return (rigs if len(rigs) > 1 else rigs[0]), tags
 
 
 def orientation_tags(yaw=0.0, pitch=0.0):
-    """Camera/facing prompt tags for the yaw & pitch slider values (each -1..1)."""
-    yaw = max(-1.0, min(1.0, float(yaw or 0.0)))
+    """Camera/facing prompt tags for the orbit camera. yaw & pitch are -1..1
+    (yaw = azimuth/pi, pitch = elevation/(pi/2)); banded on magnitude."""
+    ay = min(1.0, abs(float(yaw or 0.0)))
     pitch = max(-1.0, min(1.0, float(pitch or 0.0)))
     out = []
-    for lo, hi, tag in _YAW_TAGS:
-        if lo <= yaw < hi:
-            out.append(tag)
-            break
+    if ay <= 0.12:
+        out.append("front view, facing viewer")
+    elif ay <= 0.38:
+        out.append("3/4 view")
+    elif ay <= 0.72:
+        out.append("from side, profile view")
+    else:
+        out.append("from behind, back view, view from behind")
     if pitch >= 0.4:
         out.append("from above, high angle, looking down")
     elif pitch <= -0.4:
@@ -309,12 +318,12 @@ def orientation_tags(yaw=0.0, pitch=0.0):
     return ", ".join(out)
 
 
-def save_cn_pose(position, keypoints_frame, position_tags="", people=1,
+def save_cn_pose(position, rig=None, rigs=None, position_tags="", people=1,
                  update_yaml=True, overwrite=False):
-    """Write keypoints/<pos>.json and upsert cn_positions/<pos>.yaml.
+    """Write keypoints/<pos>.json (a 3-D rig doc) and upsert cn_positions/<pos>.yaml.
 
-    The stored pose is a single facing-neutral skeleton; the name is the pose
-    only (no view)."""
+    The stored pose is a single facing-neutral rig; the name is the pose only
+    (no camera angle)."""
     pos = re.sub(r"[^A-Za-z0-9_-]", "_", str(position).strip()).strip("_")
     if not pos:
         raise ValueError("position must be non-empty")
@@ -325,9 +334,15 @@ def save_cn_pose(position, keypoints_frame, position_tags="", people=1,
         raise ValueError("path escapes keypoints dir")
     if os.path.exists(kp_path) and not overwrite:
         raise ValueError(f"{pos}.json exists; pass overwrite=true")
-    frame = keypoints_frame[0] if isinstance(keypoints_frame, list) else keypoints_frame
+    if rigs:
+        doc = {"rigs": list(rigs)}
+        people = len(rigs)
+    elif rig is not None:
+        doc = {"rig": rig}
+    else:
+        raise ValueError("rig or rigs required")
     with open(kp_path, "w", encoding="utf-8") as fh:
-        json.dump(frame, fh)
+        json.dump(doc, fh)
 
     yaml_path = _cn_path(pos)
     if update_yaml:
