@@ -3,26 +3,12 @@ name: Cindy
 weight: 1.0
 base: >
   1girl, petite, slim, pale skin, light skin, freckles, freckles on face,
-  short hair, curly hair, brown hair, blue flower, hair flower,
-  blue eyes, soft features, gentle expression
+  short hair, curly hair, black hair, blue flower, hair flower,
+  blue eyes, soft features
 
-expressions:
-  default: ""
-  shy: blush, shy, looking away, hands clasped
-  crying: crying, tears, trembling, distressed
-  aroused: blush, half-closed eyes, parted lips, panting
-
-outfits:
-  default: >
-    frilly blue dress, lace trim, puffy sleeves, white apron,
-    blue and white striped thighhighs, mary janes
-  lolita: >
-    blue gothic lolita dress, ruffles, ribbon, petticoat, knee socks, platform shoes
-  bdsm: >
-    REDACTED,
-    blue and white striped stockings, high heels
-  casual: >
-    oversized knit sweater, denim shorts, blue thighhighs
-  nude: REDACTED
+# Outfits + expressions are shared pools now (data/outfits.yaml, data/expressions.yaml).
+# This pointer pre-seeds the outfit cascade when Cindy is picked; her signature
+# blue is a clothing colour, chosen per-shot in the base/contrast/detail slots.
+default_outfit: [female, cute, lolita, frilly dress]
 
 negative_add: ""

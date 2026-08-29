@@ -23,29 +23,35 @@ def character_segment(ch):
     source: 'preset' | 'secondbrain' | 'custom'. For 'custom', `text` is the
     whole base. For 'preset', pull data/characters/<name>.yaml. For 'secondbrain'
     the caller must have resolved the note body into `text` already (see
-    secondbrain.py); outfit/expression are ignored there.
+    secondbrain.py). outfit (a {gender,genre,subgenre,key} cascade selection),
+    `colors` ({base,contrast,detail}) and expression are universal pools applied
+    to every source.
     """
     if not ch or ch.get("enabled") is False:
         return "", ""
     src = (ch.get("source") or "preset").lower()
     weight = ch.get("weight", 1.0)
     custom = (ch.get("text") or "").strip()
+    # expressions + outfits are universal pools (data/expressions.yaml,
+    # data/outfits.yaml), picked per character; the resolved fragments still land
+    # only in this character's segment.
+    expr_kw, _ = data.get_entry("expressions", ch.get("expression") or "flat")
+    # outfit is a {gender,genre,subgenre,key} cascade selection; the fragment may
+    # carry {base}/{contrast}/{detail} slots filled from this character's colours.
+    outfit_kw = data.fill_outfit(
+        data.outfit_fragment(ch.get("outfit") or {}), ch.get("colors") or {})
 
     if src == "custom":
-        seg = data.normalize_kw(custom)
+        seg = data.normalize_kw(custom, outfit_kw, expr_kw)
         return data.apply_weight(seg, weight), ""
 
     if src == "secondbrain":
-        seg = data.normalize_kw(custom)
+        seg = data.normalize_kw(custom, outfit_kw, expr_kw)
         return data.apply_weight(seg, weight), ""
 
     # preset
     doc = data.get_character(ch.get("name", ""))
     base = str(doc.get("base", ""))
-    outfits = doc.get("outfits") or {}
-    exprs = doc.get("expressions") or {}
-    outfit_kw = str(outfits.get(ch.get("outfit", "default"), ""))
-    expr_kw = str(exprs.get(ch.get("expression", "default"), ""))
     seg = data.normalize_kw(base, outfit_kw, expr_kw, custom)
     seg = data.apply_weight(seg, weight)
     neg = data.normalize_kw(str(doc.get("negative_add", "")))

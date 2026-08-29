@@ -1,0 +1,42 @@
+# Shared clothing-colour pool. Chosen per character for the base / contrast /
+# detail slots on each card; a free-text override on the card beats this list.
+# Character identity colours (hair / eyes / skin) stay in the character's `base`,
+# NOT here.
+#
+# key: value  — value is the tag string that lands in the prompt. Kept as a map
+# (not a bare list) so richer tags are possible later, e.g.
+#   dusty rose: dusty rose, muted
+entries:
+  black: black
+  white: white
+  ivory: ivory
+  cream: cream
+  grey: grey
+  charcoal: charcoal
+  navy: navy
+  blue: blue
+  sky blue: sky blue
+  teal: teal
+  green: green
+  forest green: forest green
+  olive: olive
+  mint: mint
+  red: red
+  crimson: crimson
+  maroon: maroon
+  burgundy: burgundy
+  pink: pink
+  dusty rose: dusty rose
+  purple: purple
+  lavender: lavender
+  violet: violet
+  brown: brown
+  tan: tan
+  beige: beige
+  gold: gold
+  silver: silver
+  bronze: bronze
+  orange: orange
+  rust: rust
+  yellow: yellow
+  mustard: mustard

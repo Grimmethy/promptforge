@@ -1,0 +1,103 @@
+# Universal outfit pool. Chosen per character through the 4-level cascade in the
+# UI: gender -> genre -> subgenre -> outfit. Applies to every card source
+# (preset / secondbrain / custom), like data/expressions.yaml.
+#
+# Leaves are plain tag-fragment strings. They may contain {base} {contrast}
+# {detail} placeholders — the per-character clothing-colour slots are substituted
+# in at assembly time (unset -> removed, then normalize_kw cleans the result).
+#
+# "No outfit" = leave any cascade level unset (the "-" option); there is no
+# explicit none/default leaf. Nudity lives under the `bare` genre.
+#
+# A character YAML may carry `default_outfit: [gender, genre, subgenre, key]`
+# to pre-seed the cascade when that character is picked.
+
+female:
+  bare:
+    nude:
+      full: REDACTED
+      topless: REDACTED
+    underwear:
+      basic: "{base} bra, {contrast} panties"
+      lingerie: "REDACTED"
+  casual:
+    everyday:
+      sundress: "{base} sundress, thin straps, {detail} floral print, sandals"
+      jeans and tee: "{base} fitted t-shirt, {contrast} denim jeans, sneakers"
+      blouse and skirt: "{base} blouse, {contrast} long skirt, ribbon, loafers"
+    loungewear:
+      hoodie: "oversized {base} hoodie, {contrast} shorts, striped socks"
+      knit sweater: "{base} oversized knit sweater, denim shorts, thighhighs"
+  cute:
+    lolita:
+      frilly dress: "{base} frilly dress, lace trim, puffy sleeves, white apron, {contrast} and white striped thighhighs, mary janes"
+      gothic lolita: "{base} gothic lolita dress, ruffles, {detail} ribbon, petticoat, knee socks, platform shoes"
+    schoolgirl:
+      sailor uniform: "sailor school uniform, {contrast} neckerchief, {base} pleated skirt, thighhighs"
+      cardigan set: "{base} cardigan, {contrast} pleated skirt, knee socks, loafers"
+  fantasy:
+    adventurer:
+      ranger: "{base} ranger cloak, leather jerkin, belt pouches, worn boots, dagger"
+      leather armor: "{base} leather armor, tunic, bracers, {detail} trim, worn boots"
+    mage:
+      robe: "flowing {base} robe, hood, rope belt, {detail} pendant"
+      witch: "{base} witch hat, layered dress, {contrast} corset, buckled boots"
+    scavenger:
+      rags: "torn tattered rags, ragged loincloth, dirty, worn {base} leather straps"
+      patched jacket: "{base} oversized patched jacket, utility belt, fingerless gloves, goggles on head"
+  formal:
+    gown:
+      evening gown: "{base} evening gown, {detail} elbow gloves, heels"
+      cocktail dress: "{base} cocktail dress, clutch, strappy heels"
+    suit:
+      pantsuit: "{base} tailored pantsuit, {contrast} blouse, oxfords"
+  bdsm:
+    harness:
+      leather harness: "REDACTED"
+      rope harness: "REDACTED"
+    fetish:
+      latex suit: "REDACTED"
+      corset set: "REDACTED"
+
+male:
+  bare:
+    nude:
+      full: REDACTED
+      shirtless: "shirtless, bare chest, {contrast} trousers"
+  casual:
+    everyday:
+      open shirt: "{base} open shirt, rolled sleeves, {contrast} dark trousers, leather belt"
+      tee and jeans: "{base} t-shirt, {contrast} jeans, sneakers"
+    streetwear:
+      hoodie: "{base} hoodie, {contrast} cargo pants, boots"
+      flannel: "{base} flannel shirt, rolled sleeves, {contrast} slacks, ankle boots"
+  formal:
+    suit:
+      three piece: "{base} three-piece suit, {contrast} waistcoat, oxfords, pocket watch"
+      tuxedo: "{base} tuxedo, {contrast} bow tie, dress shoes"
+  fantasy:
+    adventurer:
+      leather jerkin: "{base} leather jerkin, tunic, bracers, worn boots"
+      chainmail: "chainmail shirt, {base} tabard, gauntlets"
+    bdsm:
+      harness: "REDACTED"
+
+androgynous:
+  bare:
+    nude:
+      full: REDACTED
+    underwear:
+      basic: "{base} briefs, {contrast} tank top"
+  casual:
+    everyday:
+      jumpsuit: "{base} utilitarian jumpsuit, {contrast} webbing belt, boots"
+      layered: "{base} oversized shirt, {contrast} trousers, sneakers"
+    streetwear:
+      techwear: "{base} techwear jacket, {contrast} cargo pants, straps, boots"
+  fantasy:
+    robe:
+      pilgrim: "{base} hooded robe, wrapped sash, sandals"
+      ranger: "{base} ranger cloak, leather jerkin, belt pouches, worn boots"
+  formal:
+    suit:
+      tailored: "{base} tailored suit, open collar, {contrast} loafers"

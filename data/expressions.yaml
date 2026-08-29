@@ -1,0 +1,13 @@
+# Facial expression / affect. Merged into each character's own prompt segment.
+# Universal pool — every character picks from the same list; the tags land only
+# in that character's BREAK chunk / regional prompt, so expressions stay distinct
+# per character. Value can be a plain string, or {pos: "...", neg: "..."}.
+entries:
+  flat: neutral expression, calm face, relaxed features
+  grim: serious, clenched jaw, frown
+  leering: grin, looking down, half-closed eyes
+  shy: blush, shy, looking away, hands clasped
+  crying: crying, tears, trembling, half-closed eyes, distressed
+  aroused: blush, half-closed eyes, parted lips, panting
+  angry: furrowed brow, clenched teeth, snarl, wild eyes
+  smug: smug, grin, half-closed eyes, looking at viewer

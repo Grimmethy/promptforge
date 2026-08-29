@@ -91,7 +91,27 @@ function updateOrientLbl() {
   if (yl) yl.textContent = yawWord(state.yaw);
   if (pl) pl.textContent = pitchWord(state.pitch);
 }
-const blankChar = () => ({ source: 'preset', name: (PRESETS.characters.preset[0] || {}).name || '', outfit: 'default', expression: 'default', weight: 1, text: '' });
+const EMPTY_OUTFIT = () => ({ gender: '', genre: '', subgenre: '', key: '' });
+const EMPTY_COLORS = () => ({ base: '', contrast: '', detail: '' });
+const outfitFromPointer = d => (Array.isArray(d) && d.length === 4)
+  ? { gender: d[0], genre: d[1], subgenre: d[2], key: d[3] } : EMPTY_OUTFIT();
+
+const blankChar = () => ({
+  source: 'preset', name: (PRESETS.characters.preset[0] || {}).name || '',
+  outfit: outfitFromPointer((PRESETS.characters.preset[0] || {}).default_outfit),
+  colors: EMPTY_COLORS(), expression: 'flat', weight: 1, text: '',
+});
+
+// Coerce a possibly-legacy char (string `outfit`, missing `colors`) to the
+// current shape. A pre-cascade outfit string can't be mapped into the tree, so
+// it's dropped — the character comes up undressed until re-picked.
+function normalizeChar(c) {
+  c.outfit = (c.outfit && typeof c.outfit === 'object')
+    ? { ...EMPTY_OUTFIT(), ...c.outfit } : EMPTY_OUTFIT();
+  c.colors = (c.colors && typeof c.colors === 'object')
+    ? { ...EMPTY_COLORS(), ...c.colors } : EMPTY_COLORS();
+  return c;
+}
 
 function renderChars() {
   const wrap = $('#charCards'); wrap.innerHTML = '';
@@ -102,7 +122,17 @@ function renderChars() {
   persist();
 }
 
+// One <select> with a leading "—" (value "") sentinel. `opts` are label strings;
+// option value === label (matches the rest of the app), the sentinel is value "".
+function dashSelect(opts, val, on) {
+  const s = el('select', { onchange: e => on(e.target.value) },
+    [el('option', { value: '' }, '—'), ...opts.map(x => el('option', {}, x))]);
+  s.value = opts.includes(val) ? val : '';
+  return s;
+}
+
 function charCard(c, i) {
+  normalizeChar(c);
   const setSrc = s => { c.source = s; renderChars(); schedulePreview(); };
   const hd = el('div', { class: 'hd' }, [
     el('span', { class: 'tag ' + (i === 0 ? 'A' : 'B') }, i === 0 ? 'A · left' : 'B · right'),
@@ -112,31 +142,79 @@ function charCard(c, i) {
     el('button', { class: 'x', onclick: () => { state.chars.splice(i, 1); renderChars(); schedulePreview(); } }, '✕'),
   ]);
 
+  // Expressions are a universal pool (data/expressions.yaml) — same list on
+  // every card type, still chosen per character.
+  const exprList = PRESETS.expressions || ['flat'];
+  if (!exprList.includes(c.expression)) c.expression = exprList[0] || 'flat';
+  const expSel = el('select', { onchange: e => { c.expression = e.target.value; schedulePreview(); } }, exprList.map(o => el('option', {}, o)));
+  expSel.value = c.expression;
+  const exprRow = () => el('div', {}, [el('label', {}, 'Expression'), expSel]);
+
+  // Outfits are a universal 4-level pool (data/outfits.yaml): gender -> genre ->
+  // subgenre -> outfit. Changing an upper level clears the levels below it and
+  // rebuilds the card so the dependent option lists recompute. Editing the YAML
+  // on disk needs a page reload (PRESETS is only re-fetched after a save).
+  const dressControls = () => {
+    const T = PRESETS.outfits || {};
+    const o = c.outfit;
+    const L1 = Object.keys(T);
+    if (o.gender && !L1.includes(o.gender)) { o.gender = o.genre = o.subgenre = o.key = ''; }
+    const L2 = o.gender ? Object.keys(T[o.gender] || {}) : [];
+    if (o.genre && !L2.includes(o.genre)) { o.genre = o.subgenre = o.key = ''; }
+    const L3 = o.genre ? Object.keys((T[o.gender] || {})[o.genre] || {}) : [];
+    if (o.subgenre && !L3.includes(o.subgenre)) { o.subgenre = o.key = ''; }
+    const L4 = o.subgenre ? Object.keys(((T[o.gender] || {})[o.genre] || {})[o.subgenre] || {}) : [];
+    if (o.key && !L4.includes(o.key)) { o.key = ''; }
+
+    const gSel = dashSelect(L1, o.gender, v => { o.gender = v; o.genre = o.subgenre = o.key = ''; renderChars(); schedulePreview(); });
+    const geSel = dashSelect(L2, o.genre, v => { o.genre = v; o.subgenre = o.key = ''; renderChars(); schedulePreview(); });
+    const sgSel = dashSelect(L3, o.subgenre, v => { o.subgenre = v; o.key = ''; renderChars(); schedulePreview(); });
+    const kSel = dashSelect(L4, o.key, v => { o.key = v; schedulePreview(); });
+
+    const colorOpts = PRESETS.colors || [];
+    const colorCell = slot => {
+      const eff = c.colors[slot] || '';
+      const hit = colorOpts.includes(eff);
+      const sel = el('select', {}, [el('option', { value: '' }, '—'), ...colorOpts.map(x => el('option', {}, x))]);
+      sel.value = hit ? eff : '';
+      const txt = el('input', { type: 'text', placeholder: 'override', value: hit ? '' : eff });
+      const apply = () => { c.colors[slot] = (txt.value.trim() || sel.value || ''); schedulePreview(); };
+      sel.onchange = apply; txt.onchange = apply;
+      return el('div', {}, [el('label', {}, slot), sel, txt]);
+    };
+
+    return [
+      el('label', {}, 'Outfit'),
+      el('div', { class: 'grid4' }, [gSel, geSel, sgSel, kSel]),
+      el('label', {}, 'Clothing colour'),
+      el('div', { class: 'grid3' }, ['base', 'contrast', 'detail'].map(colorCell)),
+    ];
+  };
+
   const body = [];
   if (c.source === 'preset') {
     const names = PRESETS.characters.preset.map(p => p.name);
-    const p = PRESETS.characters.preset.find(x => x.name === c.name) || PRESETS.characters.preset[0] || { outfits: ['default'], expressions: ['default'] };
-    const nameSel = el('select', { onchange: e => { c.name = e.target.value; c.outfit = 'default'; c.expression = 'default'; renderChars(); schedulePreview(); } }, names.map(n => el('option', {}, n)));
+    const nameSel = el('select', {
+      onchange: e => {
+        c.name = e.target.value;
+        const p = PRESETS.characters.preset.find(x => x.name === c.name);
+        c.outfit = outfitFromPointer(p && p.default_outfit);
+        renderChars(); schedulePreview();
+      },
+    }, names.map(n => el('option', {}, n)));
     nameSel.value = c.name;
-    const outSel = el('select', { onchange: e => { c.outfit = e.target.value; schedulePreview(); } }, (p.outfits || ['default']).map(o => el('option', {}, o)));
-    outSel.value = c.outfit;
-    const expSel = el('select', { onchange: e => { c.expression = e.target.value; schedulePreview(); } }, (p.expressions || ['default']).map(o => el('option', {}, o)));
-    expSel.value = c.expression;
-    body.push(nameSel, el('div', { class: 'grid2' }, [
-      el('div', {}, [el('label', {}, 'Outfit'), outSel]),
-      el('div', {}, [el('label', {}, 'Expression'), expSel]),
-    ]), presetEditor(c.name));
+    body.push(nameSel, ...dressControls(), exprRow(), presetEditor(c.name));
   } else if (c.source === 'secondbrain') {
     const names = PRESETS.characters.secondbrain.map(p => p.name);
     if (!names.length) body.push(el('div', { class: 'muted' }, 'No SECOND_BRAIN_DIR/Characters/*.md found.'));
     else {
       const s = el('select', { onchange: e => { c.name = e.target.value; schedulePreview(); } }, names.map(n => el('option', {}, n)));
       s.value = names.includes(c.name) ? c.name : names[0]; c.name = s.value;
-      body.push(s);
+      body.push(s, ...dressControls(), exprRow());
     }
   } else {
     const ta = el('textarea', { placeholder: '1girl, describe the character in danbooru tags…', onchange: e => { c.text = e.target.value; schedulePreview(); } });
-    ta.value = c.text; body.push(ta);
+    ta.value = c.text; body.push(ta, ...dressControls(), exprRow());
   }
 
   // the exact text this character injects into the prompt (filled by preview())
@@ -268,8 +346,9 @@ async function savePose() {
 // ------------------------------------------------------------- spec + preview
 function buildSpec() {
   const chars = state.chars.map(c => ({
-    source: c.source, name: c.name, outfit: c.outfit, expression: c.expression,
-    weight: c.weight, text: c.text,
+    source: c.source, name: c.name,
+    outfit: { ...c.outfit }, colors: { ...c.colors },
+    expression: c.expression, weight: c.weight, text: c.text,
   }));
   const spec = {
     characters: chars,
@@ -401,7 +480,7 @@ async function loadGallery() {
 
 // ------------------------------------------------------------- persistence
 function applySpec(spec) {
-  state.chars = (spec.characters || []).map(c => ({ ...blankChar(), ...c }));
+  state.chars = (spec.characters || []).map(c => normalizeChar({ ...blankChar(), ...c }));
   for (const k of ['theme', 'model', 'sampler', 'scheduler'])
     if (spec[k] != null && $('#' + k)) $('#' + k).value = spec[k];
   for (const k of ['cfg', 'steps', 'seed', 'batch', 'width', 'height', 'cn_strength', 'cn_end'])
@@ -436,7 +515,7 @@ function restore() {
   try {
     const s = JSON.parse(localStorage.pf_state || '{}');
     if (s.form) for (const [k, v] of Object.entries(s.form)) { const n = $('#' + k); if (n) n.value = v; }
-    state.chars = s.chars || [];
+    state.chars = (s.chars || []).map(normalizeChar);
     state.poseName = s.poseName || null;
     state.yaw = s.yaw || 0;
     state.pitch = s.pitch || 0;

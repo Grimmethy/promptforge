@@ -19,7 +19,8 @@ RAND_DIR = os.path.join(DATA_DIR, "randomizer")
 CN_DIR = os.path.join(DATA_DIR, "cn_positions")
 CN_KP_DIR = os.path.join(CN_DIR, "keypoints")
 
-CATEGORIES = ("poses", "positions", "styles", "backgrounds", "supporting")
+CATEGORIES = ("poses", "positions", "styles", "backgrounds", "supporting",
+              "expressions", "colors")
 
 
 # --------------------------------------------------------------------------- io
@@ -133,24 +134,6 @@ def raw_character(name):
         return fh.read()
 
 
-def character_outfits(name):
-    outfits = get_character(name).get("outfits") or {}
-    keys = list(outfits.keys())
-    if "default" in keys:
-        keys.remove("default")
-        keys.insert(0, "default")
-    return keys or ["default"]
-
-
-def character_expressions(name):
-    expr = get_character(name).get("expressions") or {}
-    keys = list(expr.keys())
-    if "default" in keys:
-        keys.remove("default")
-        keys.insert(0, "default")
-    return keys or ["default"]
-
-
 def save_character(filename, spec_yaml):
     """Write a character YAML. Returns the path. Guards against path escape."""
     safe = re.sub(r"[^A-Za-z0-9_-]", "_", os.path.splitext(str(filename))[0]).strip("_")
@@ -190,6 +173,51 @@ def get_entry(category, key):
     if isinstance(val, dict):
         return str(val.get("pos", "")), str(val.get("neg", ""))
     return str(val or ""), ""
+
+
+# ------------------------------------------------------------------- outfits
+
+# Shared outfit pool: a nested gender -> genre -> subgenre -> key -> fragment
+# tree in data/outfits.yaml. Fragments may carry {base}/{contrast}/{detail}
+# placeholders for the per-character clothing-colour slots (see fill_outfit).
+_OUTFIT_PLACEHOLDER = re.compile(r"\{(base|contrast|detail)\}")
+
+
+def load_outfit_tree():
+    """Raw nested outfit dict. Reloaded per request like the rest of the module."""
+    return _load_yaml(os.path.join(DATA_DIR, "outfits.yaml"))
+
+
+def outfit_fragment(sel):
+    """sel: {'gender','genre','subgenre','key'} or a 4-item list.
+
+    Return the leaf fragment string, or "" for any incomplete or unknown path.
+    """
+    if isinstance(sel, dict):
+        path = [sel.get("gender"), sel.get("genre"),
+                sel.get("subgenre"), sel.get("key")]
+    else:
+        path = list(sel or [])
+    if len(path) != 4 or not all(path):
+        return ""
+    node = load_outfit_tree()
+    for step in path:
+        if not isinstance(node, dict) or step not in node:
+            return ""
+        node = node[step]
+    return str(node or "")
+
+
+def fill_outfit(template, colors):
+    """Substitute {base|contrast|detail} in an outfit fragment from `colors`.
+
+    Missing / empty slots collapse to "". A regex sub (not str.format) so literal
+    punctuation and stray braces in a fragment can't raise. Any doubled commas or
+    spaces left behind are cleaned by normalize_kw downstream.
+    """
+    colors = colors or {}
+    return _OUTFIT_PLACEHOLDER.sub(
+        lambda m: str(colors.get(m.group(1), "") or "").strip(), template or "")
 
 
 # --------------------------------------------------------------- randomizer

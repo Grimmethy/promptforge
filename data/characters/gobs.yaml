@@ -9,20 +9,8 @@ base: >
   orange hair, wolf cut, messy hair, short hair, yellow eyes,
   sharp teeth, fang, snaggletooth, pig nose, short nubby tail
 
-expressions:
-  default: ""
-  angry: furrowed brow, clenched teeth, snarl, wild eyes
-  crying: crying, tears, half-closed eyes, trembling
-  smug: smug, grin, half-closed eyes, looking at viewer
-
-outfits:
-  default: >
-    torn tattered rags, ragged loincloth, dirty, worn leather straps
-  bdsm: >
-    REDACTED
-  scavenger: >
-    oversized patched jacket, utility belt, fingerless gloves, goggles on head
-  nude: REDACTED,
+# Outfits + expressions are shared pools now (data/outfits.yaml, data/expressions.yaml).
+default_outfit: [female, fantasy, scavenger, rags]
 
 # keeps the green from leaking onto a human partner in the frame
 negative_add: >

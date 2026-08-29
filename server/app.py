@@ -82,8 +82,7 @@ def presets():
     for name in data.list_characters():
         preset_chars.append({
             "source": "preset", "name": name,
-            "outfits": data.character_outfits(name),
-            "expressions": data.character_expressions(name),
+            "default_outfit": data.get_character(name).get("default_outfit"),
         })
     sb_chars = [{"source": "secondbrain", "name": n}
                 for n in secondbrain.list_characters()]
@@ -101,6 +100,10 @@ def presets():
         "positions": data.list_entries("positions"),
         "poses": data.list_entries("poses"),
         "supporting": data.list_entries("supporting"),
+        "expressions": data.list_entries("expressions"),
+        "outfits": data.load_outfit_tree(),
+        "colors": [data.get_entry("colors", k)[0] or k
+                   for k in data.list_entries("colors")],
         "themes": [{"name": n, **themes.get_theme(n)} for n in themes.list_themes()],
         "cn_positions": cn,
         "view_tags": data.load_view_tags(),

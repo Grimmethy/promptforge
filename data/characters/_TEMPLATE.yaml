@@ -5,9 +5,12 @@
 #   weight: optional; when not 1.0 the whole segment is wrapped (text:weight)
 #   base:   the always-on keywords for this character (Danbooru tags work best;
 #           lead with 1girl/1boy + species + the traits that make them unique)
-#   expressions: optional named add-ons; picked from the "expression" dropdown
-#   outfits:     one or more; picked from the "outfit" dropdown. Always include
-#                a "default". Add as many as you like.
+#   default_outfit: optional [gender, genre, subgenre, key] pointer into
+#                data/outfits.yaml; the UI seeds the outfit cascade with it when
+#                this character is picked. Outfits + expressions are shared pools
+#                now (data/outfits.yaml, data/expressions.yaml), not per-character.
+#   NOTE: hair / eye / skin colours stay in `base`. Clothing colours (base /
+#         contrast / detail) are chosen per-shot in the UI, not stored here.
 #   negative_add: optional; surfaces on the node's 2nd output for the Assembler.
 
 name: New Character
@@ -16,15 +19,6 @@ base: >
   1girl, (trait, trait, trait),
   hair colour + style, eye colour, body type, distinguishing features
 
-expressions:
-  default: ""
-  angry: furrowed brow, clenched teeth
-
-outfits:
-  default: >
-    describe the everyday outfit here
-  alt: >
-    describe an alternate outfit here
-  nude: REDACTED
+default_outfit: [female, casual, everyday, sundress]
 
 negative_add: ""

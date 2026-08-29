@@ -7,16 +7,8 @@ base: >
   tan skin, muscular, toned, short black hair, stubble, body hair,
   large hands, faceless male
 
-expressions:
-  default: ""
-  grim: serious, clenched jaw, frown
-  leering: grin, looking down, half-closed eyes
-
-outfits:
-  default: >
-    open shirt, rolled sleeves, dark trousers, leather belt
-  nude: REDACTED
-  harness: REDACTED
+# Outfits + expressions are shared pools now (data/outfits.yaml, data/expressions.yaml).
+default_outfit: [male, casual, everyday, open shirt]
 
 negative_add: >
   green skin, green-skinned male, goblin, orc, colored skin, pointy ears

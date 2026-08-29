@@ -55,6 +55,10 @@ details { border: 1px solid var(--border); border-radius: 6px; padding: 6px 9px;
 details > summary { cursor: pointer; font-size: 11px; text-transform: uppercase;
                     letter-spacing: .06em; color: var(--muted); }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+.grid4 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 6px; }
+.grid3 select, .grid3 input, .grid4 select { min-width: 0; width: 100%; }
+.grid3 > div { display: flex; flex-direction: column; gap: 3px; }
 
 .card .inject { white-space: pre-wrap; word-break: break-word;
                 background: var(--bg); border: 1px solid var(--border); border-radius: 5px;
