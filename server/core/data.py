@@ -246,13 +246,20 @@ def cn_position_views(name):
     return views or list(load_view_tags().keys()) or ["from_side"]
 
 
-def cn_view_skeleton(name, view):
-    """Return (abs_json_path_or_None, extra_view_tags)."""
+def cn_view_skeleton(name, view=None):
+    """Legacy multi-view lookup. Return (abs_json_path_or_None, extra_view_tags).
+
+    Kept for any old-format YAML that still carries a `views:` map; new poses
+    store a single `skeleton:` file and facing is applied at render time — see
+    cn_canonical_skeleton() and pose_ops.orient().
+    """
     pos = get_cn_position(name)
     views = pos.get("views") or {}
-    entry = views.get(view)
+    entry = views.get(view) if view else None
     if not entry and pos.get("default_view"):
         entry = views.get(pos["default_view"])
+    if not entry and views:
+        entry = next(iter(views.values()))
     if isinstance(entry, str):
         entry = {"file": entry, "tags": ""}
     entry = entry or {}
@@ -263,20 +270,61 @@ def cn_view_skeleton(name, view):
     return path, str(entry.get("tags", ""))
 
 
-def save_cn_pose(position, view, keypoints_frame, position_tags="", people=1,
+def cn_canonical_skeleton(name):
+    """Return (abs_json_path_or_None, pose_tags) for a position's single stored
+    skeleton. Facing is no longer baked in — the yaw/pitch sliders synthesise it.
+    Falls back to the old `views:`/`default_view:` shape."""
+    pos = get_cn_position(name)
+    fname = pos.get("skeleton")
+    if fname:
+        path = os.path.join(CN_KP_DIR, fname)
+        if os.path.isfile(path):
+            return path, str(pos.get("tags", ""))
+    path, _ = cn_view_skeleton(name)
+    return path, str(pos.get("tags", ""))
+
+
+_YAW_TAGS = [
+    (-1.01, -0.55, "from side, profile view"),
+    (-0.55, -0.15, "3/4 view, turned to the side"),
+    (-0.15, 0.15, "front view, facing viewer"),
+    (0.15, 0.55, "3/4 view from behind"),
+    (0.55, 1.01, "from behind, back view, view from behind"),
+]
+
+
+def orientation_tags(yaw=0.0, pitch=0.0):
+    """Camera/facing prompt tags for the yaw & pitch slider values (each -1..1)."""
+    yaw = max(-1.0, min(1.0, float(yaw or 0.0)))
+    pitch = max(-1.0, min(1.0, float(pitch or 0.0)))
+    out = []
+    for lo, hi, tag in _YAW_TAGS:
+        if lo <= yaw < hi:
+            out.append(tag)
+            break
+    if pitch >= 0.4:
+        out.append("from above, high angle, looking down")
+    elif pitch <= -0.4:
+        out.append("from below, low angle, looking up")
+    return ", ".join(out)
+
+
+def save_cn_pose(position, keypoints_frame, position_tags="", people=1,
                  update_yaml=True, overwrite=False):
-    """Write keypoints/<pos>__<view>.json and upsert cn_positions/<pos>.yaml."""
+    """Write keypoints/<pos>.json and upsert cn_positions/<pos>.yaml.
+
+    The stored pose is a single facing-neutral skeleton; the name is the pose
+    only (no view)."""
     pos = re.sub(r"[^A-Za-z0-9_-]", "_", str(position).strip()).strip("_")
-    vw = re.sub(r"[^A-Za-z0-9_-]", "_", str(view).strip()).strip("_")
-    if not pos or not vw:
-        raise ValueError("position and view must be non-empty")
+    if not pos:
+        raise ValueError("position must be non-empty")
     os.makedirs(CN_KP_DIR, exist_ok=True)
 
-    kp_path = os.path.abspath(os.path.join(CN_KP_DIR, f"{pos}__{vw}.json"))
+    kp_path = os.path.abspath(os.path.join(CN_KP_DIR, f"{pos}.json"))
     if os.path.commonpath([kp_path, os.path.abspath(CN_KP_DIR)]) != os.path.abspath(CN_KP_DIR):
         raise ValueError("path escapes keypoints dir")
     if os.path.exists(kp_path) and not overwrite:
-        raise ValueError(f"{pos}__{vw}.json exists; pass overwrite=true")
+        raise ValueError(f"{pos}.json exists; pass overwrite=true")
     frame = keypoints_frame[0] if isinstance(keypoints_frame, list) else keypoints_frame
     with open(kp_path, "w", encoding="utf-8") as fh:
         json.dump(frame, fh)
@@ -284,14 +332,14 @@ def save_cn_pose(position, view, keypoints_frame, position_tags="", people=1,
     yaml_path = _cn_path(pos)
     if update_yaml:
         doc = _load_yaml(yaml_path) if os.path.isfile(yaml_path) else {}
-        new = not doc
         doc.setdefault("name", pos.replace("_", " ").title())
-        if new:
+        if "people" not in doc:
             doc["people"] = int(people)
-            doc["tags"] = str(position_tags or "")
-            doc["default_view"] = vw
-        doc.setdefault("views", {})
-        doc["views"][vw] = {"file": f"{pos}__{vw}.json", "tags": ""}
+        if position_tags or "tags" not in doc:
+            doc["tags"] = str(position_tags or doc.get("tags", ""))
+        doc["skeleton"] = f"{pos}.json"
+        doc.pop("views", None)
+        doc.pop("default_view", None)
         with open(yaml_path, "w", encoding="utf-8") as fh:
             yaml.safe_dump(doc, fh, sort_keys=False, allow_unicode=True)
     return kp_path

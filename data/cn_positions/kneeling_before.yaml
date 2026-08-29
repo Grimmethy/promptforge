@@ -1,8 +1,4 @@
 name: Kneeling Before
 people: 2
 tags: REDACTED
-default_view: from_side
-views:
-  from_side:
-    file: kneeling_before__from_side.json
-    tags: ''
+skeleton: kneeling_before.json

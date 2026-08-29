@@ -91,11 +91,7 @@ def presets():
     for p in data.list_cn_positions():
         doc = data.get_cn_position(p)
         cn.append({"name": p, "people": doc.get("people", 1),
-                   "tags": doc.get("tags", ""),
-                   # only views that have a real keypoint file (for the editor's
-                   # "load pose" picker); the tag-only angles aren't loadable
-                   "views": list((doc.get("views") or {}).keys()) or ["from_side"],
-                   "all_views": data.cn_position_views(p)})
+                   "tags": doc.get("tags", "")})
 
     return jsonify({
         "characters": {"preset": preset_chars, "secondbrain": sb_chars},
@@ -139,12 +135,12 @@ def theme(name):
 
 # ----------------------------------------------------------------------- pose
 
-@app.route("/api/pose/<path:position>/<path:view>")
-def pose_frame(position, view):
-    path, tags = data.cn_view_skeleton(position, view)
+@app.route("/api/pose/<path:position>")
+def pose_frame(position):
+    path, tags = data.cn_canonical_skeleton(position)
     if not path:
-        return jsonify({"error": "no skeleton for that position/view"}), 404
-    return jsonify({"frame": pose_ops.load_json(path), "view_tags": tags})
+        return jsonify({"error": "no skeleton for that position"}), 404
+    return jsonify({"frame": pose_ops.load_json(path), "tags": tags})
 
 
 @app.route("/api/pose/render", methods=["POST"])
@@ -154,7 +150,7 @@ def pose_render():
     h = int(b.get("h", 896))
     frame = b.get("keypoints")
     if frame is None and b.get("position"):
-        path, _ = data.cn_view_skeleton(b["position"], b.get("view", "from_side"))
+        path, _ = data.cn_canonical_skeleton(b["position"])
         if not path:
             return jsonify({"error": "unknown position"}), 404
         frame = pose_ops.load_json(path)
@@ -164,7 +160,9 @@ def pose_render():
         frame,
         mirror_h=bool(b.get("mirror")), scale=float(b.get("scale", 1.0)),
         offset_x=float(b.get("offset_x", 0.0)), offset_y=float(b.get("offset_y", 0.0)),
-        dutch_deg=float(b.get("dutch_angle", 0.0)), canvas_w=w, canvas_h=h,
+        dutch_deg=float(b.get("dutch_angle", 0.0)),
+        yaw=float(b.get("yaw", 0.0)), pitch=float(b.get("pitch", 0.0)),
+        canvas_w=w, canvas_h=h,
     )
     png = pose_ops.render_png(frame, w, h,
                               draw_hands=bool(b.get("draw_hands")),
@@ -177,7 +175,7 @@ def save_pose():
     b = request.get_json(force=True, silent=True) or {}
     try:
         path = data.save_cn_pose(
-            b["position"], b["view"], b["keypoints"],
+            b["position"], b["keypoints"],
             b.get("position_tags", ""), int(b.get("people", 1)),
             bool(b.get("update_yaml", True)), bool(b.get("overwrite", False)))
     except Exception as exc:  # noqa: BLE001
@@ -276,19 +274,21 @@ def resolve_job(spec):
     frame = None
     sk = spec.get("skeleton") or {}
     pos_name = spec.get("pose_position")
-    pose_view = spec.get("pose_view") or "from_side"
+    yaw = float(spec.get("yaw", 0.0) or 0.0)
+    pitch = float(spec.get("pitch", 0.0) or 0.0)
     if pos_name:
-        lib_path, vtags = data.cn_view_skeleton(pos_name, pose_view)
-        pdoc = data.get_cn_position(pos_name)
-        pose_tags = data.normalize_kw(pdoc.get("tags", ""), vtags,
-                                      data.load_view_tags().get(spec.get("pose_view", ""), ""))
+        lib_path, ptags = data.cn_canonical_skeleton(pos_name)
+        pose_tags = data.normalize_kw(ptags, data.orientation_tags(yaw, pitch))
         if not sk.get("people") and lib_path:
             frame = pose_ops.load_json(lib_path)
+    elif yaw or pitch:
+        pose_tags = data.orientation_tags(yaw, pitch)
     if sk.get("people"):
         frame = {"people": sk["people"],
                  "canvas_width": j["width"], "canvas_height": j["height"]}
     if frame is not None:
-        frame = pose_ops.transform(frame, canvas_w=j["width"], canvas_h=j["height"])
+        frame = pose_ops.transform(frame, yaw=yaw, pitch=pitch,
+                                   canvas_w=j["width"], canvas_h=j["height"])
         j["skeleton_png"] = pose_ops.render_png(frame, j["width"], j["height"])
     j["pose_tags"] = pose_tags
 

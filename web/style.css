@@ -68,6 +68,17 @@ details.presetEd textarea.yaml { width: 100%; margin: 6px 0; font: 11px/1.4 ui-m
            border-radius: 6px; padding: 8px; font-size: 11px; max-height: 180px; overflow: auto; }
 
 /* editor */
+.poseGrid { display: grid; grid-template-columns: 1fr 22px; grid-template-rows: 1fr 22px;
+            gap: 4px; align-items: center; }
+.poseGrid canvas { grid-column: 1; grid-row: 1; width: 100%; background: #0c0d10;
+                   border: 1px solid var(--border); border-radius: 6px;
+                   touch-action: none; display: block; }
+.poseGrid .vslider { grid-column: 2; grid-row: 1; writing-mode: vertical-lr; direction: rtl;
+                     width: 22px; height: 100%; margin: 0; }
+.poseGrid .hslider { grid-column: 1; grid-row: 2; width: 100%; margin: 0; }
+.orientLbl { display: flex; gap: 6px; align-items: center; font-size: 11px;
+             color: var(--muted); margin-top: 4px; }
+.orientLbl button { margin-left: auto; }
 #editorWrap canvas { width: 100%; background: #0c0d10; border: 1px solid var(--border);
                      border-radius: 6px; touch-action: none; display: block; }
 #editorTools { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }

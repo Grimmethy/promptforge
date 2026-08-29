@@ -1,8 +1,4 @@
 name: Kneeling
 people: 1
 tags: kneeling, sitting on heels
-default_view: from_side
-views:
-  from_side:
-    file: kneeling__from_side.json
-    tags: ''
+skeleton: kneeling.json

@@ -1,8 +1,4 @@
 name: Bent Over
 people: 1
 tags: bent over, hands on knees, ass out
-default_view: from_side
-views:
-  from_side:
-    file: bent_over__from_side.json
-    tags: ''
+skeleton: bent_over.json

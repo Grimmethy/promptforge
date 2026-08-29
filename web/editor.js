@@ -41,7 +41,8 @@ class PoseEditor {
     this.cv = canvas;
     this.ctx = canvas.getContext('2d');
     this.onChange = onChange || (() => {});
-    this.figures = [];          // [{pts: [[x,y,c]*18]}]
+    this.figures = [];          // [{pts: [[x,y,c]*18]}]  — facing-neutral, canonical
+    this.yaw = 0; this.pitch = 0;   // facing sliders, -1..1; a display + export transform
     this.drag = null;           // {fi, ji}
     this.hist = []; this.redoStack = [];
     canvas.addEventListener('pointerdown', e => this._down(e));
@@ -66,6 +67,42 @@ class PoseEditor {
     if (!frame || !frame.people || !frame.people.length) return;
     this.figures = frame.people.map(p => ({ pts: flatToPts(p.pose_keypoints_2d || []) }));
     this._snap(); this.draw(); this._emit();
+  }
+
+  setOrient(yaw, pitch) {
+    this.yaw = Math.max(-1, Math.min(1, +yaw || 0));
+    this.pitch = Math.max(-1, Math.min(1, +pitch || 0));
+    this.draw(); this._emit();
+  }
+
+  // --- yaw/pitch fake-3D, mirror of pose_ops.orient() (backend re-applies it) ---
+  _yawSx(y) {
+    const th = y >= 0 ? y * Math.PI : y * (Math.PI / 2);
+    const sx = Math.cos(th);
+    return Math.abs(sx) >= 0.12 ? sx : (sx < 0 ? -0.12 : 0.12);
+  }
+  _pitchSy(p) { return Math.max(0.4, Math.cos(p * 55 * Math.PI / 180)); }
+  _headDx(y) { return Math.sin(y >= 0 ? y * Math.PI : y * (Math.PI / 2)) * 0.03; }
+  _centroid(pts) {
+    const v = pts.filter(p => p[2]);
+    if (!v.length) return [0.5, 0.5];
+    return [v.reduce((a, p) => a + p[0], 0) / v.length, v.reduce((a, p) => a + p[1], 0) / v.length];
+  }
+  _orientPts(pts) {
+    if (!this.yaw && !this.pitch) return pts;
+    const [cx, cy] = this._centroid(pts);
+    const sx = this._yawSx(this.yaw), sy = this._pitchSy(this.pitch), hdx = this._headDx(this.yaw);
+    const head = new Set([0, 14, 15, 16, 17]);
+    return pts.map(([x, y, c], i) => c
+      ? [cx + (x - cx) * sx + (head.has(i) ? hdx : 0), cy + (y - cy) * sy, c]
+      : [x, y, c]);
+  }
+  _unorientPt(nx, ny, pts, ji) {
+    if (!this.yaw && !this.pitch) return [nx, ny];
+    const [cx, cy] = this._centroid(pts);
+    const sx = this._yawSx(this.yaw), sy = this._pitchSy(this.pitch);
+    const hdx = new Set([0, 14, 15, 16, 17]).has(ji) ? this._headDx(this.yaw) : 0;
+    return [cx + (nx - cx - hdx) / sx, cy + (ny - cy) / sy];
   }
 
   getFrame(w, h) {
@@ -112,7 +149,7 @@ class PoseEditor {
   }
   _hit(nx, ny) {
     let best = null, bd = 0.035;
-    this.figures.forEach((f, fi) => f.pts.forEach(([x, y, c], ji) => {
+    this.figures.forEach((f, fi) => this._orientPts(f.pts).forEach(([x, y, c], ji) => {
       if (!c) return;
       const d = Math.hypot(x - nx, y - ny);
       if (d < bd) { bd = d; best = { fi, ji }; }
@@ -124,7 +161,10 @@ class PoseEditor {
     if (!this.drag) return;
     let [nx, ny] = this._norm(e);
     nx = Math.max(0, Math.min(1, nx)); ny = Math.max(0, Math.min(1, ny));
-    this.figures[this.drag.fi].pts[this.drag.ji] = [nx, ny, 1];
+    const f = this.figures[this.drag.fi];
+    let [cx, cy] = this._unorientPt(nx, ny, f.pts, this.drag.ji);
+    cx = Math.max(0, Math.min(1, cx)); cy = Math.max(0, Math.min(1, cy));
+    f.pts[this.drag.ji] = [cx, cy, 1];
     this.draw();
   }
   _up() { if (this.drag) { this.drag = null; this._snap(); this._emit(); } }
@@ -135,11 +175,14 @@ class PoseEditor {
     else {                                                   // add nearest missing on nearest figure
       let fi = 0, bd = 9;
       this.figures.forEach((f, i) => {
-        const cx = f.pts.filter(p => p[2]).reduce((a, p) => a + p[0], 0) / Math.max(1, f.pts.filter(p => p[2]).length);
+        const [cx] = this._centroid(this._orientPts(f.pts));
         const d = Math.abs(cx - nx); if (d < bd) { bd = d; fi = i; }
       });
       const miss = this.figures[fi].pts.findIndex(p => !p[2]);
-      if (miss >= 0) this.figures[fi].pts[miss] = [nx, ny, 1];
+      if (miss >= 0) {
+        const [cx, cy] = this._unorientPt(nx, ny, this.figures[fi].pts, miss);
+        this.figures[fi].pts[miss] = [Math.max(0, Math.min(1, cx)), Math.max(0, Math.min(1, cy)), 1];
+      }
     }
     this._snap(); this.draw(); this._emit();
   }
@@ -151,15 +194,16 @@ class PoseEditor {
     ctx.fillStyle = '#0c0d10'; ctx.fillRect(0, 0, W, H);
     this.figures.forEach((f, fi) => {
       const tint = fi === 0 ? '#4fc3f7' : '#ffb74d';
+      const pts = this._orientPts(f.pts);
       COCO18.limbs.forEach(([a, b], li) => {
-        const p1 = f.pts[a], p2 = f.pts[b];
+        const p1 = pts[a], p2 = pts[b];
         if (!p1[2] || !p2[2]) return;
         const col = COCO18.colors[li % 18];
         ctx.strokeStyle = `rgb(${col[0]},${col[1]},${col[2]})`;
         ctx.lineWidth = 5; ctx.lineCap = 'round';
         ctx.beginPath(); ctx.moveTo(p1[0] * W, p1[1] * H); ctx.lineTo(p2[0] * W, p2[1] * H); ctx.stroke();
       });
-      f.pts.forEach(([x, y, c], ji) => {
+      pts.forEach(([x, y, c], ji) => {
         if (!c) return;
         ctx.beginPath(); ctx.arc(x * W, y * H, 4.5, 0, 7);
         ctx.fillStyle = '#fff'; ctx.fill();

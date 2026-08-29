@@ -107,6 +107,66 @@ def mirror(frame):
     return frame
 
 
+def _centroid(triples):
+    pts = [(x, y) for x, y, c in triples if c > 0]
+    if not pts:
+        return 0.5, 0.5
+    return sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
+
+
+def _yaw_sx(yaw):
+    """Horizontal foreshorten factor for a yaw in [-1, 1].
+
+    0 = facing front (sx=1). Negative turns left: yaw=-1 -> left profile
+    (theta=-90 deg, sx=0). Positive turns away: yaw=+1 -> facing back
+    (theta=180 deg, sx=-1), passing profile at yaw=+0.5.
+    """
+    yaw = max(-1.0, min(1.0, float(yaw)))
+    theta = yaw * math.pi if yaw >= 0 else yaw * (math.pi / 2.0)
+    sx = math.cos(theta)
+    # keep it invertible near profile
+    return sx if abs(sx) >= 0.12 else math.copysign(0.12, sx or 1.0)
+
+
+def _pitch_sy(pitch):
+    """Vertical foreshorten for a pitch in [-1, 1] (camera elevation).
+
+    0 = eye level (sy=1). +1 = camera above / high angle, -1 = below.
+    """
+    pitch = max(-1.0, min(1.0, float(pitch)))
+    return max(0.4, math.cos(pitch * math.radians(55.0)))
+
+
+def orient(frame, yaw=0.0, pitch=0.0, only_person=None):
+    """Fake a change of facing (yaw) and camera elevation (pitch) on a 2D
+    skeleton by foreshortening each figure about its own centroid, plus a
+    small head-turn nudge. Not anatomically exact — a ControlNet hint."""
+    if not yaw and not pitch:
+        return copy.deepcopy(frame)
+    sx, sy = _yaw_sx(yaw), _pitch_sy(pitch)
+    head_dx = math.sin(yaw * math.pi if yaw >= 0 else yaw * (math.pi / 2.0)) * 0.03
+    f = copy.deepcopy(frame)
+    for pi, person in enumerate(f.get("people", [])):
+        if only_person is not None and only_person >= 0 and pi != only_person:
+            continue
+        body = person.get("pose_keypoints_2d") or []
+        if not body:
+            continue
+        t = _triples(body)
+        cx, cy = _centroid(t)
+        head_idx = {0, 14, 15, 16, 17}
+        for i, (x, y, c) in enumerate(t):
+            if c <= 0:
+                continue
+            nx = cx + (x - cx) * sx
+            ny = cy + (y - cy) * sy
+            if i in head_idx:
+                nx += head_dx
+            t[i] = (nx, ny, c)
+        person["pose_keypoints_2d"] = _flat(t)
+    return f
+
+
 def nudge_person(frame, index, dx, dy, s):
     frame = scale_about_center(frame, s, only_person=index) if s != 1.0 else copy.deepcopy(frame)
     if dx or dy:
@@ -115,11 +175,13 @@ def nudge_person(frame, index, dx, dy, s):
 
 
 def transform(frame, *, mirror_h=False, scale=1.0, offset_x=0.0, offset_y=0.0,
-              dutch_deg=0.0, canvas_w=1152, canvas_h=896):
-    """mirror -> scale -> move -> rotate; stamps canvas dims."""
+              dutch_deg=0.0, yaw=0.0, pitch=0.0, canvas_w=1152, canvas_h=896):
+    """orient -> mirror -> scale -> move -> rotate; stamps canvas dims."""
     f = copy.deepcopy(first_frame(frame))
     f.setdefault("canvas_width", canvas_w)
     f.setdefault("canvas_height", canvas_h)
+    if yaw or pitch:
+        f = orient(f, yaw, pitch)
     if mirror_h:
         f = mirror(f)
     if scale != 1.0:

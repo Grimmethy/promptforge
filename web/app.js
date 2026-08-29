@@ -32,6 +32,15 @@ async function boot() {
   $('#addChar').onclick = () => { if (state.chars.length < 2) { state.chars.push(blankChar()); renderChars(); } };
   $('#poseLoad').onclick = loadPose;
   $('#poseSave').onclick = savePose;
+  const onOrient = () => {
+    state.yaw = +$('#yawSlider').value; state.pitch = +$('#pitchSlider').value;
+    editor.setOrient(state.yaw, state.pitch); updateOrientLbl(); persist(); schedulePreview();
+  };
+  $('#yawSlider').addEventListener('input', onOrient);
+  $('#pitchSlider').addEventListener('input', onOrient);
+  $('#orientReset').onclick = () => {
+    $('#yawSlider').value = 0; $('#pitchSlider').value = 0; onOrient();
+  };
   $('#generate').onclick = generate;
   $('#reroll').onclick = () => { $('#seed').value = -1; generate(); };
   $$('#inputs select, #inputs input, #inputs textarea').forEach(n => n.addEventListener('change', () => { persist(); schedulePreview(); }));
@@ -65,7 +74,25 @@ async function comfyStatus() {
 }
 
 // ------------------------------------------------------------- characters
-const state = { chars: [] };
+const state = { chars: [], yaw: 0, pitch: 0 };
+
+function yawWord(y) {
+  if (y <= -0.55) return 'left profile';
+  if (y < -0.15) return '3/4 left';
+  if (y < 0.15) return 'front';
+  if (y < 0.55) return '3/4 from behind';
+  return 'facing away';
+}
+function pitchWord(p) {
+  if (p >= 0.4) return 'high angle';
+  if (p <= -0.4) return 'low angle';
+  return 'eye level';
+}
+function updateOrientLbl() {
+  const yl = $('#yawLbl'), pl = $('#pitchLbl');
+  if (yl) yl.textContent = yawWord(state.yaw);
+  if (pl) pl.textContent = pitchWord(state.pitch);
+}
 const blankChar = () => ({ source: 'preset', name: (PRESETS.characters.preset[0] || {}).name || '', outfit: 'default', expression: 'default', weight: 1, text: '' });
 
 function renderChars() {
@@ -160,6 +187,9 @@ function syncEditor() {
   $('#editorSection').style.display = n ? '' : 'none';
   if (!n || !editor) return;
   editor.setCount(n, lastLibFrame && lastLibFrame.people?.length === n ? lastLibFrame : null);
+  $('#yawSlider').value = state.yaw; $('#pitchSlider').value = state.pitch;
+  editor.setOrient(state.yaw, state.pitch);
+  updateOrientLbl();
   buildEditorTools();
   refreshPoseLib();
 }
@@ -194,36 +224,33 @@ function refreshPoseLib() {
   const n = state.chars.length || 1;
   const opts = PRESETS.cn_positions.filter(p => p.people === n);
   const sel = $('#poseLib'); sel.innerHTML = '';
-  opts.forEach(p => (p.views || ['from_side']).forEach(v =>
-    sel.append(el('option', { value: `${p.name}|${v}` }, `${p.name} · ${v}`))));
+  opts.forEach(p => sel.append(el('option', { value: p.name }, p.name)));
   if (!opts.length) sel.append(el('option', {}, '(no library poses for ' + n + ')'));
-  // Drop a remembered pose that no longer fits the current character count;
-  // otherwise keep the dropdown pointed at it.
-  const want = state.poseName ? `${state.poseName}|${state.poseView || 'from_side'}` : '';
-  if (want && [...sel.options].some(o => o.value === want)) sel.value = want;
-  else { state.poseName = null; state.poseView = null; }
+  // Drop a remembered pose that no longer fits the current character count.
+  if (state.poseName && [...sel.options].some(o => o.value === state.poseName)) sel.value = state.poseName;
+  else state.poseName = null;
 }
 
 async function loadPose() {
-  const [pos, view] = ($('#poseLib').value || '').split('|');
+  const pos = $('#poseLib').value || '';
   if (!pos) return;
-  const d = await fetch(`/api/pose/${encodeURIComponent(pos)}/${encodeURIComponent(view)}`).then(r => r.json());
+  const d = await fetch(`/api/pose/${encodeURIComponent(pos)}`).then(r => r.json());
   if (d.error) return toast(d.error);
   lastLibFrame = d.frame;
   state.poseName = pos;
-  state.poseView = view;
   editor.loadFrame(d.frame);
   buildEditorTools();
 }
 
 async function savePose() {
-  const name = prompt('Save pose as (position name):', 'my_pose');
+  const name = prompt('Save pose as (name — the pose only, no camera angle):',
+    state.poseName || 'my_pose');
   if (!name) return;
-  const view = prompt('View label:', 'from_side') || 'from_side';
+  const tags = prompt('Pose tags for the prompt (e.g. "kneeling, hands on thighs"):', '') || '';
   const r = await fetch('/api/save-pose', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      position: name, view, people: editor.figures.length, overwrite: true,
+      position: name, position_tags: tags, people: editor.figures.length, overwrite: true,
       keypoints: editor.getFrame(+$('#width').value, +$('#height').value),
     }),
   }).then(r => r.json());
@@ -258,10 +285,10 @@ function buildSpec() {
   // Carry the chosen library pose so the backend can add its pose/action words
   // to the prompt — the edited skeleton only drives ControlNet, which a
   // voluminous outfit can hide.
-  if (state.poseName) {
-    spec.pose_position = state.poseName;
-    spec.pose_view = state.poseView || 'from_side';
-  }
+  if (state.poseName) spec.pose_position = state.poseName;
+  // facing sliders: procedural yaw/pitch, applied to the skeleton + as camera tags
+  if (state.yaw) spec.yaw = state.yaw;
+  if (state.pitch) spec.pitch = state.pitch;
   return spec;
 }
 
@@ -374,7 +401,8 @@ function applySpec(spec) {
   if (spec.negative) $('#negative').value = spec.negative;
   if (spec.layout) $('#layout').value = spec.layout;
   state.poseName = spec.pose_position || null;
-  state.poseView = spec.pose_view || null;
+  state.yaw = spec.yaw || 0;
+  state.pitch = spec.pitch || 0;
   renderChars();
   if (spec.skeleton?.people && editor) { lastLibFrame = { people: spec.skeleton.people }; editor.loadFrame(lastLibFrame); }
   toast('settings restored'); schedulePreview();
@@ -384,7 +412,7 @@ function persist() {
   try {
     localStorage.pf_state = JSON.stringify({
       chars: state.chars, form: formValues(),
-      poseName: state.poseName, poseView: state.poseView,
+      poseName: state.poseName, yaw: state.yaw, pitch: state.pitch,
     });
   } catch { }
 }
@@ -399,7 +427,8 @@ function restore() {
     if (s.form) for (const [k, v] of Object.entries(s.form)) { const n = $('#' + k); if (n) n.value = v; }
     state.chars = s.chars || [];
     state.poseName = s.poseName || null;
-    state.poseView = s.poseView || null;
+    state.yaw = s.yaw || 0;
+    state.pitch = s.pitch || 0;
   } catch { state.chars = []; }
 }
 

@@ -1,11 +1,4 @@
 name: Standing
 people: 1
 tags: standing, arms at sides
-default_view: front
-views:
-  front:
-    file: standing__front.json
-    tags: ''
-  from_side:
-    file: standing__from_side.json
-    tags: ''
+skeleton: standing.json
