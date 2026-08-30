@@ -94,6 +94,7 @@ async function onNsfwToggle(e) {
   $('#nsfw').checked = !!r.enabled;
   toast('NSFW content ' + (r.enabled ? 'shown' : 'hidden'));
   await reloadPresets();
+  await loadGallery();
 }
 
 

@@ -382,8 +382,12 @@ def resolve_job(spec):
     n = len(chars)
     j["n_chars"] = n
 
+    nsfw = False
     char_segs, char_negs = [], []
     for c in chars:
+        if data.outfit_in_overlay(c.get("outfit") or {}) or data.entry_in_overlay(
+                "expressions", c.get("expression") or ""):
+            nsfw = True
         if c.get("source") == "secondbrain" and not c.get("text"):
             sb = secondbrain.get_character(c.get("name", ""))
             c = {**c, "text": sb.get("base", "")}
@@ -418,6 +422,8 @@ def resolve_job(spec):
     pk = (spec.get("pose_keywords") or "").strip()
     if pk:
         pose_tags = data.normalize_kw(pose_tags, pk)
+    if pos_name and data.cn_position_in_overlay(pos_name):
+        nsfw = True
     if pos_name and not sk.get("people"):
         # API fallback: a pose name but no edited skeleton -> project the stored rig.
         _rig, _ = data.cn_canonical_rig(pos_name)
@@ -468,6 +474,7 @@ def resolve_job(spec):
         j["prompt_used"] = {"positive": j["positive"], "negative": j["negative"]}
 
     j["spec"] = spec
+    j["nsfw"] = nsfw
     return j
 
 
@@ -502,17 +509,37 @@ def job(jid):
     return jsonify(rec)
 
 
+def _sidecar_path_for(rel):
+    d, base = os.path.split(rel)
+    return os.path.join(GALLERY_DIR, d, base.split("_")[0] + ".json")
+
+
+def _image_is_nsfw(rel):
+    """Sidecar `nsfw` flag for a gallery image relpath (missing sidecar / key
+    defaults to False, so images predating this feature stay visible)."""
+    try:
+        with open(_sidecar_path_for(rel)) as fh:
+            return bool(json.load(fh).get("nsfw"))
+    except (OSError, ValueError):
+        return False
+
+
 def _gallery_pngs():
     """(relpath, mtime) for every gallery PNG, recursing month sub-dirs, skipping
-    the hidden .thumbs cache. Newest first."""
+    the hidden .thumbs cache. NSFW-tagged images are omitted while the NSFW
+    toggle is off. Newest first."""
+    show_nsfw = data.nsfw_enabled()
     rows = []
     for root, dirs, files in os.walk(GALLERY_DIR):
         dirs[:] = [d for d in dirs if d != thumbs.THUMB_SUBDIR]
         for f in files:
             if f.endswith(".png"):
                 fp = os.path.join(root, f)
+                rel = os.path.relpath(fp, GALLERY_DIR)
+                if not show_nsfw and _image_is_nsfw(rel):
+                    continue
                 try:
-                    rows.append((os.path.relpath(fp, GALLERY_DIR), os.path.getmtime(fp)))
+                    rows.append((rel, os.path.getmtime(fp)))
                 except OSError:
                     pass
     rows.sort(key=lambda r: r[1], reverse=True)

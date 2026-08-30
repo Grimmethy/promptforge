@@ -273,6 +273,47 @@ def outfit_fragment(sel):
     return str(node or "")
 
 
+def outfit_in_overlay(sel):
+    """True if an outfit selection ({gender,genre,subgenre,key} or 4-item list)
+    resolves inside the gitignored NSFW overlay tree (data/nsfw/outfits.yaml)."""
+    over = _load_overlay("outfits.yaml")
+    if not over:
+        return False
+    if isinstance(sel, dict):
+        path = [sel.get("gender"), sel.get("genre"), sel.get("subgenre"), sel.get("key")]
+    else:
+        path = list(sel or [])
+    if len(path) != 4 or not all(path):
+        return False
+    node = over
+    for step in path:
+        if not isinstance(node, dict) or step not in node:
+            return False
+        node = node[step]
+    return True
+
+
+def entry_in_overlay(category, key):
+    """True if a flat-pool entry (expressions/poses/...) lives in the NSFW
+    overlay (data/nsfw/<category>.yaml)."""
+    if not key:
+        return False
+    over = _load_overlay(category + ".yaml")
+    entries = (over or {}).get("entries") or {}
+    return key in entries
+
+
+def cn_position_in_overlay(name):
+    """True if a named ControlNet pose resolves from the NSFW overlay dir
+    (data/nsfw/cn_positions/) rather than the tracked library."""
+    if not name or not nsfw_enabled():
+        return False
+    for ext in (".yaml", ".yml"):
+        if os.path.isfile(os.path.join(NSFW_CN_DIR, name + ext)):
+            return True
+    return False
+
+
 def fill_outfit(template, colors):
     """Substitute {base|contrast|detail} in an outfit fragment from `colors`.
 

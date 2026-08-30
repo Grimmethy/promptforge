@@ -219,6 +219,7 @@ def _run(job, rec, gallery_dir):
                 sidecar = {"id": job["id"], "seed": job["seed"],
                            "model": job["model"], "spec": job.get("spec"),
                            "prompt_used": job.get("prompt_used"),
+                           "nsfw": bool(job.get("nsfw")),
                            "images": saved, "ts": time.time()}
                 with open(os.path.join(outdir, f"{job['id'][:8]}.json"), "w") as fh:
                     json.dump(sidecar, fh, indent=1)
