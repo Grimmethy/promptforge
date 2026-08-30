@@ -22,6 +22,9 @@ CN_KP_DIR = os.path.join(CN_DIR, "keypoints")
 CATEGORIES = ("poses", "positions", "styles", "backgrounds", "supporting",
               "expressions", "colors")
 
+# Targets the UI's inline "add entry" boxes may write to (see add_entry).
+ALLOWED_ENTRY_TARGETS = frozenset(CATEGORIES) | {"outfits", "themes"}
+
 
 # --------------------------------------------------------------------------- io
 
@@ -218,6 +221,63 @@ def fill_outfit(template, colors):
     colors = colors or {}
     return _OUTFIT_PLACEHOLDER.sub(
         lambda m: str(colors.get(m.group(1), "") or "").strip(), template or "")
+
+
+# ---------------------------------------------- add / update / delete entry (UI)
+
+def _entry_target(target, path, value=None, fields=None, *, kind="add"):
+    """Resolve a UI entry write to (file_path, parent_path, node).
+
+    target: one of ALLOWED_ENTRY_TARGETS.
+      - a flat CATEGORIES pool -> `entries: {key: <tag string>}`.
+      - "outfits" -> `path` is the ancestor keys; add: 1-3 deep (leaf `key: value` at
+        3, empty branch `key: {}` shallower); update: leaf only (3 deep); delete: any.
+      - "themes"  -> `themes: {key: {style,setting_bias,palette,lighting,negative_add}}`.
+    `node` is unused for kind='delete'. Raises ValueError on bad input.
+    """
+    target = str(target or "").strip()
+    if target not in ALLOWED_ENTRY_TARGETS:
+        raise ValueError(f"unknown target '{target}'")
+    file_path = os.path.abspath(os.path.join(DATA_DIR, target + ".yaml"))
+    if os.path.commonpath([file_path, os.path.abspath(DATA_DIR)]) != os.path.abspath(DATA_DIR):
+        raise ValueError("path escapes data dir")
+    path = [str(p).strip() for p in (path or [])]
+
+    if target in CATEGORIES:
+        parent_path = ["entries"] + path
+        node = str(value or "").strip()
+    elif target == "outfits":
+        lo, hi = {"update": (3, 3), "delete": (0, 3)}.get(kind, (1, 3))
+        if not lo <= len(path) <= hi:
+            raise ValueError("bad outfits path for this operation")
+        parent_path = path
+        node = str(value or "").strip() if len(path) == 3 else {}
+    else:  # themes
+        from . import themes
+        parent_path = ["themes"]
+        node = {k: str((fields or {}).get(k, "")).strip() for k in themes._KEYS}
+    return file_path, parent_path, node
+
+
+def add_entry(target, path, key, value=None, fields=None):
+    """Append a new entry to a data YAML from the UI, preserving comments."""
+    from . import yaml_insert
+    fp, parent, node = _entry_target(target, path, value, fields, kind="add")
+    return yaml_insert.insert_entry(fp, parent, key, node)
+
+
+def update_entry(target, path, key, value=None, fields=None):
+    """Replace an existing entry's value in place, preserving comments."""
+    from . import yaml_insert
+    fp, parent, node = _entry_target(target, path, value, fields, kind="update")
+    return yaml_insert.update_entry(fp, parent, key, node)
+
+
+def delete_entry(target, path, key):
+    """Remove an entry (and its subtree) from a data YAML, preserving comments."""
+    from . import yaml_insert
+    fp, parent, _ = _entry_target(target, path, kind="delete")
+    return yaml_insert.delete_entry(fp, parent, key)
 
 
 # --------------------------------------------------------------- randomizer

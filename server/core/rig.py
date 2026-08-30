@@ -49,6 +49,19 @@ LENGTH_KEYS = ["torso", "neck", "clavicle", "upperArm", "forearm",
 DEFAULT_LENGTHS = {"torso": 0.20, "neck": 0.16, "clavicle": 0.09, "upperArm": 0.15,
                    "forearm": 0.14, "hipWidth": 0.07, "thigh": 0.22, "shin": 0.22}
 
+# Canonical forward depth (+z = toward camera) applied to a neutral rig and used
+# to nudge a fully-planar loaded rig so the orbit camera can actually turn it
+# instead of collapsing the limbs onto the spine. Keep mirrored with
+# web/editor.js DEPTH_PRIOR / defaultRig.
+DEPTH_PRIOR = {
+    "waist": 0.0, "chest": 0.03, "head": 0.01,
+    "shoulder.L": -0.01, "elbow.L": 0.05, "hand.L": 0.08,
+    "shoulder.R": -0.01, "elbow.R": 0.05, "hand.R": 0.08,
+    "hip.L": -0.01, "knee.L": 0.04, "foot.L": 0.0,
+    "hip.R": -0.01, "knee.R": 0.04, "foot.R": 0.0,
+}
+_FLAT_Z_EPS = 0.005
+
 # plausible range per body part (canvas fractions) — clamps rough lifts + edits
 LENGTH_RANGE = {"torso": (0.13, 0.30), "neck": (0.09, 0.22), "clavicle": (0.05, 0.14),
                 "upperArm": (0.09, 0.21), "forearm": (0.09, 0.21), "hipWidth": (0.04, 0.12),
@@ -82,24 +95,36 @@ def _norm(v):
 
 def default_rig(cx=0.0):
     L = dict(DEFAULT_LENGTHS)
+    Z = DEPTH_PRIOR
     j = {
-        "waist": [cx, 0.10, 0.0],
-        "chest": [cx, 0.10 - L["torso"], 0.0],
-        "head": [cx, 0.10 - L["torso"] - L["neck"], 0.0],
-        "shoulder.L": [cx + L["clavicle"], 0.10 - L["torso"] + 0.01, 0.0],
-        "elbow.L": [cx + L["clavicle"], 0.10 - L["torso"] + L["upperArm"], 0.0],
-        "hand.L": [cx + L["clavicle"], 0.10 - L["torso"] + L["upperArm"] + L["forearm"], 0.0],
-        "shoulder.R": [cx - L["clavicle"], 0.10 - L["torso"] + 0.01, 0.0],
-        "elbow.R": [cx - L["clavicle"], 0.10 - L["torso"] + L["upperArm"], 0.0],
-        "hand.R": [cx - L["clavicle"], 0.10 - L["torso"] + L["upperArm"] + L["forearm"], 0.0],
-        "hip.L": [cx + L["hipWidth"], 0.10, 0.0],
-        "knee.L": [cx + L["hipWidth"], 0.10 + L["thigh"], 0.0],
-        "foot.L": [cx + L["hipWidth"], 0.10 + L["thigh"] + L["shin"], 0.0],
-        "hip.R": [cx - L["hipWidth"], 0.10, 0.0],
-        "knee.R": [cx - L["hipWidth"], 0.10 + L["thigh"], 0.0],
-        "foot.R": [cx - L["hipWidth"], 0.10 + L["thigh"] + L["shin"], 0.0],
+        "waist": [cx, 0.10, Z["waist"]],
+        "chest": [cx, 0.10 - L["torso"], Z["chest"]],
+        "head": [cx, 0.10 - L["torso"] - L["neck"], Z["head"]],
+        "shoulder.L": [cx + L["clavicle"], 0.10 - L["torso"] + 0.01, Z["shoulder.L"]],
+        "elbow.L": [cx + L["clavicle"], 0.10 - L["torso"] + L["upperArm"], Z["elbow.L"]],
+        "hand.L": [cx + L["clavicle"], 0.10 - L["torso"] + L["upperArm"] + L["forearm"], Z["hand.L"]],
+        "shoulder.R": [cx - L["clavicle"], 0.10 - L["torso"] + 0.01, Z["shoulder.R"]],
+        "elbow.R": [cx - L["clavicle"], 0.10 - L["torso"] + L["upperArm"], Z["elbow.R"]],
+        "hand.R": [cx - L["clavicle"], 0.10 - L["torso"] + L["upperArm"] + L["forearm"], Z["hand.R"]],
+        "hip.L": [cx + L["hipWidth"], 0.10, Z["hip.L"]],
+        "knee.L": [cx + L["hipWidth"], 0.10 + L["thigh"], Z["knee.L"]],
+        "foot.L": [cx + L["hipWidth"], 0.10 + L["thigh"] + L["shin"], Z["foot.L"]],
+        "hip.R": [cx - L["hipWidth"], 0.10, Z["hip.R"]],
+        "knee.R": [cx - L["hipWidth"], 0.10 + L["thigh"], Z["knee.R"]],
+        "foot.R": [cx - L["hipWidth"], 0.10 + L["thigh"] + L["shin"], Z["foot.R"]],
     }
     return {"joints": j, "lengths": L, "root": "waist"}
+
+
+def _nudge_if_flat(j):
+    """A rig with ~no depth can't be turned by the orbit camera without the
+    limbs collapsing onto the spine. Give a genuinely planar rig the canonical
+    depth prior. Idempotent: a rig that already has depth is returned unchanged."""
+    zs = [p[2] for p in j.values()]
+    if zs and (max(zs) - min(zs)) < _FLAT_Z_EPS:
+        for name, p in j.items():
+            p[2] = p[2] + DEPTH_PRIOR.get(name, 0.0)
+    return j
 
 
 def normalize(rig):
@@ -115,6 +140,7 @@ def normalize(rig):
     for k, v in (rig.get("lengths") or {}).items():
         if k in L:
             L[k] = float(v)
+    _nudge_if_flat(j)
     return {"joints": j, "lengths": clamp_lengths(L), "root": rig.get("root", "waist")}
 
 
@@ -178,8 +204,8 @@ CAM_DIST = 1.35
 
 def project_person(rig, azimuth=0.0, elevation=0.0):
     """rig -> a COCO-18 person dict (perspective orbit camera). Drops the nose
-    when the camera is behind the head; blanks the skeleton entirely if the
-    projection collapses (a flat rig seen edge-on) so the prompt drives."""
+    when the camera is behind the head; blanks the skeleton only if the
+    projection genuinely collapses to a point/line."""
     j = rig["joints"]
     rot = {name: _rotx(_roty(p, -azimuth), -elevation) for name, p in j.items()}
     scr = {}
@@ -189,14 +215,9 @@ def project_person(rig, azimuth=0.0, elevation=0.0):
                      min(1.0, max(0.0, 0.5 + q[1] * f)))
     xs = [s[0] for s in scr.values()]
     ys = [s[1] for s in scr.values()]
-    zr = [p[2] for p in j.values()]
-    flat_rig = (max(zr) - min(zr)) < 0.08
-    az = ((azimuth + math.pi) % (2 * math.pi)) - math.pi
-    near_back = abs(az) > 2.4
-    # collapsed edge-on, OR a flat rig turned to the back (its mirrored-front
-    # projection would fight the "from behind" tags) -> no skeleton
-    degenerate = ((max(xs) - min(xs) < 0.05) or (max(ys) - min(ys) < 0.05)
-                  or (flat_rig and near_back))
+    # Rigs carry real depth now, so a side/back view is a legitimate projection —
+    # only blank when everything has collapsed onto a point or a line.
+    degenerate = (max(xs) - min(xs) < 0.03) or (max(ys) - min(ys) < 0.03)
     hide_nose = ("head" in rot and "chest" in rot
                  and rot["head"][2] < rot["chest"][2] - 0.05)
     flat = []

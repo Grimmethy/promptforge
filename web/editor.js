@@ -45,20 +45,42 @@ const rotX = (p, a) => { const c = Math.cos(a), s = Math.sin(a); return [p[0], p
 const clampLen = (k, x) => { const [lo, hi] = RIG.range[k]; return Math.min(hi, Math.max(lo, x)); };
 const CAM_DIST = 1.35;
 
+// Canonical forward depth (+z = toward camera). A neutral rig is built with it,
+// and a fully-planar loaded rig is nudged to it, so the orbit camera can turn
+// the figure instead of collapsing the limbs onto the spine.
+// Keep mirrored with server/core/rig.py DEPTH_PRIOR / default_rig.
+const DEPTH_PRIOR = {
+  waist: 0, chest: 0.03, head: 0.01,
+  'shoulder.L': -0.01, 'elbow.L': 0.05, 'hand.L': 0.08,
+  'shoulder.R': -0.01, 'elbow.R': 0.05, 'hand.R': 0.08,
+  'hip.L': -0.01, 'knee.L': 0.04, 'foot.L': 0,
+  'hip.R': -0.01, 'knee.R': 0.04, 'foot.R': 0,
+};
+const FLAT_Z_EPS = 0.005;
+
 function defaultRig(cx = 0) {
   const L = { ...RIG.defaults };
-  const t = 0.10, top = t - L.torso;
+  const t = 0.10, top = t - L.torso, Z = DEPTH_PRIOR;
   return {
     root: 'waist',
     lengths: L,
     joints: {
-      waist: [cx, t, 0], chest: [cx, top, 0], head: [cx, top - L.neck, 0],
-      'shoulder.L': [cx + L.clavicle, top + .01, 0], 'elbow.L': [cx + L.clavicle, top + L.upperArm, 0], 'hand.L': [cx + L.clavicle, top + L.upperArm + L.forearm, 0],
-      'shoulder.R': [cx - L.clavicle, top + .01, 0], 'elbow.R': [cx - L.clavicle, top + L.upperArm, 0], 'hand.R': [cx - L.clavicle, top + L.upperArm + L.forearm, 0],
-      'hip.L': [cx + L.hipWidth, t, 0], 'knee.L': [cx + L.hipWidth, t + L.thigh, 0], 'foot.L': [cx + L.hipWidth, t + L.thigh + L.shin, 0],
-      'hip.R': [cx - L.hipWidth, t, 0], 'knee.R': [cx - L.hipWidth, t + L.thigh, 0], 'foot.R': [cx - L.hipWidth, t + L.thigh + L.shin, 0],
+      waist: [cx, t, Z.waist], chest: [cx, top, Z.chest], head: [cx, top - L.neck, Z.head],
+      'shoulder.L': [cx + L.clavicle, top + .01, Z['shoulder.L']], 'elbow.L': [cx + L.clavicle, top + L.upperArm, Z['elbow.L']], 'hand.L': [cx + L.clavicle, top + L.upperArm + L.forearm, Z['hand.L']],
+      'shoulder.R': [cx - L.clavicle, top + .01, Z['shoulder.R']], 'elbow.R': [cx - L.clavicle, top + L.upperArm, Z['elbow.R']], 'hand.R': [cx - L.clavicle, top + L.upperArm + L.forearm, Z['hand.R']],
+      'hip.L': [cx + L.hipWidth, t, Z['hip.L']], 'knee.L': [cx + L.hipWidth, t + L.thigh, Z['knee.L']], 'foot.L': [cx + L.hipWidth, t + L.thigh + L.shin, Z['foot.L']],
+      'hip.R': [cx - L.hipWidth, t, Z['hip.R']], 'knee.R': [cx - L.hipWidth, t + L.thigh, Z['knee.R']], 'foot.R': [cx - L.hipWidth, t + L.thigh + L.shin, Z['foot.R']],
     },
   };
+}
+
+// A rig with ~no depth collapses under camera yaw; give a genuinely planar rig
+// the canonical depth prior. Idempotent — a rig that already has depth is left be.
+function nudgeIfFlat(j) {
+  const zs = Object.values(j).map(p => p[2]);
+  if (zs.length && Math.max(...zs) - Math.min(...zs) < FLAT_Z_EPS)
+    for (const [name, p] of Object.entries(j)) p[2] = p[2] + (DEPTH_PRIOR[name] || 0);
+  return j;
 }
 
 function normalizeRig(r) {
@@ -69,6 +91,7 @@ function normalizeRig(r) {
     if (j[k] && Array.isArray(p)) j[k] = [+p[0] || 0, +p[1] || 0, +p[2] || 0];
   const L = { ...base.lengths };
   for (const k of RIG.lengthKeys) if (r.lengths && r.lengths[k] != null) L[k] = clampLen(k, +r.lengths[k]);
+  nudgeIfFlat(j);
   return { root: 'waist', joints: j, lengths: L };
 }
 
@@ -116,10 +139,23 @@ class PoseEditor {
     window.addEventListener('pointerup', () => this._up());
     canvas.addEventListener('pointerleave', () => { this.hover = null; this.draw(); });
     canvas.addEventListener('contextmenu', e => { e.preventDefault(); this.resetView(); });
+    canvas.addEventListener('wheel', e => this._wheel(e), { passive: false });
+  }
+
+  // scroll over a joint -> push it toward (+) / away from (-) the camera in depth
+  _wheel(e) {
+    if (!(this.hover && this.hover.kind === 'joint')) return;
+    e.preventDefault();
+    const r = this.rigs[this.hover.fi]; if (!r) return;
+    const p = r.joints[this.hover.name];
+    p[2] = Math.max(-0.45, Math.min(0.45, p[2] - Math.sign(e.deltaY) * 0.02));
+    constrain(r);
+    this._snap(); this.draw(); this._emit();
   }
 
   // ---------- rig set / get ----------
   setCount(n, lib) {
+    const before = JSON.stringify(this.rigs);
     const libRigs = lib && (lib.rigs || (lib.rig && [lib.rig]));
     if (libRigs && libRigs.length === n) {
       this.rigs = libRigs.map(r => constrain(normalizeRig(r)));
@@ -128,7 +164,10 @@ class PoseEditor {
         this.rigs.push(defaultRig(n === 1 ? 0 : (this.rigs.length ? 0.22 : -0.22)));
       this.rigs.length = n;
     }
-    this._snap(); this.draw(); this._emit();
+    this.draw();
+    // only touch history / notify when the rig actually changed — a plain re-render
+    // (outfit/name dropdown) must not spam undo or re-persist.
+    if (JSON.stringify(this.rigs) !== before) { this._snap(); this._emit(); }
   }
   loadRig(data) {
     const rigs = data && (data.rigs || (data.rig && [data.rig]));
@@ -145,12 +184,10 @@ class PoseEditor {
       people: this.rigs.map(r => {
         const proj = {}; for (const k of RIG.joints) proj[k] = this._project(r.joints[k]);
         const xs = RIG.joints.map(k => proj[k].x), ys = RIG.joints.map(k => proj[k].y);
-        const zr = RIG.joints.map(k => r.joints[k][2]);
-        const flatRig = Math.max(...zr) - Math.min(...zr) < 0.08;
-        const az = ((this.cam.az + Math.PI) % (2 * Math.PI)) - Math.PI;
-        const degenerate = (Math.max(...xs) - Math.min(...xs) < 0.05) ||
-                           (Math.max(...ys) - Math.min(...ys) < 0.05) ||
-                           (flatRig && Math.abs(az) > 2.4);
+        // Rigs carry real depth now, so a side/back view is a valid projection —
+        // only blank when everything has collapsed onto a point or a line.
+        const degenerate = (Math.max(...xs) - Math.min(...xs) < 0.03) ||
+                           (Math.max(...ys) - Math.min(...ys) < 0.03);
         const hideNose = proj.head.z < proj.chest.z - 0.05;
         const flat = [];
         for (let i = 0; i < 18; i++) {

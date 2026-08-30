@@ -30,17 +30,25 @@ async function boot() {
   editor = new PoseEditor($('#poseCanvas'), () => {
     const o = editor.exportYawPitch();
     state.yaw = o.yaw; state.pitch = o.pitch;
+    state._rigs = editor.getRigs();   // keep the live pose in memory, not just localStorage
     updateOrientLbl(); persist(); schedulePreview();
   });
 
   $('#addChar').onclick = () => { if (state.chars.length < 2) { state.chars.push(blankChar()); renderChars(); } };
   $('#poseLoad').onclick = loadPose;
   $('#poseSave').onclick = savePose;
+  $('#poseReset').onclick = () => {
+    if (lastLibFrame && (lastLibFrame.rigs || lastLibFrame.rig)) editor.loadRig(lastLibFrame);
+    else { editor.rigs = []; state._rigs = null; syncEditor(true); }   // no base -> default rig
+    state._rigs = editor.getRigs(); persist(); schedulePreview();
+    toast('pose reset');
+  };
   $('#orientReset').onclick = () => editor.resetView();
   $('#generate').onclick = generate;
   $('#reroll').onclick = () => { $('#seed').value = -1; generate(); };
   $$('#inputs select, #inputs input, #inputs textarea').forEach(n => n.addEventListener('change', () => { persist(); schedulePreview(); }));
   $('#theme').addEventListener('change', applyThemeHints);
+  installAddBoxes();   // after the blanket change-listener so add-box inputs are excluded
 
   restore();
   renderChars();
@@ -55,6 +63,179 @@ function fillSelect(sel, opts, keep) {
   n.innerHTML = '';
   opts.forEach(o => n.append(el('option', {}, o)));
   if (opts.includes(cur)) n.value = cur;
+}
+
+// --------------------------------------------------- inline add / edit / delete
+// Every picker gets a small box to add a new entry, or pick an existing one and
+// edit / delete its value — written straight into the backing YAML
+// (POST /api/entry, comments preserved). On success we re-pull /api/presets.
+async function reloadPresets() {
+  PRESETS = await fetch('/api/presets').then(r => r.json());
+  fillSelect('#theme', PRESETS.themes.map(t => t.name));
+  fillSelect('#setting', ['none', ...PRESETS.backgrounds.filter(x => x !== 'none')]);
+  fillSelect('#style', ['none', ...PRESETS.styles.filter(x => x !== 'none')]);
+  refreshPoseLib();
+  renderChars();
+  schedulePreview();
+}
+
+const _NEW = '＋ new…';
+
+async function _entryFetch(body) {
+  return fetch('/api/entry', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then(r => r.json()).catch(() => ({ error: 'request failed' }));
+}
+
+// opts: { target, path?, keys, getValue?, branchOnly?, nameIsValue?, onDone? }
+//   keys()      -> current entry keys for this category (re-read live)
+//   getValue(k) -> current value, sync (outfit tree / colours); omit for a lazy
+//                  POST {action:"get"} (flat pools)
+//   branchOnly  -> no value box; add-name-only + delete (outfit gender/genre/subgenre)
+function addEntryRow(opts) {
+  const keyList = () => (opts.keys ? opts.keys() : []).filter(k => k && k !== 'none' && k !== '—' && k !== _NEW);
+  const sel = el('select', {});
+  const nameI = el('input', { type: 'text', placeholder: 'name' });
+  const valI = opts.branchOnly ? null : el('input', { type: 'text', placeholder: 'prompt tags' });
+  const saveBtn = el('button', { class: 'small' }, 'Add');
+  const delBtn = el('button', { class: 'small del', title: 'delete entry' }, '🗑');
+
+  const syncSel = () => {
+    const cur = sel.value;
+    sel.innerHTML = '';
+    for (const o of [_NEW, ...keyList()]) sel.append(el('option', {}, o));
+    sel.value = [...sel.options].some(o => o.value === cur) ? cur : _NEW;
+  };
+  const setMode = async () => {
+    const k = sel.value, isNew = k === _NEW;
+    nameI.value = isNew ? '' : k;
+    nameI.readOnly = !isNew;
+    if (valI) valI.value = isNew ? '' : (opts.getValue ? (opts.getValue(k) || '')
+      : (await _entryFetch({ action: 'get', target: opts.target, key: k })).value || '');
+    saveBtn.textContent = isNew ? 'Add' : 'Save';
+    saveBtn.disabled = opts.branchOnly && !isNew;
+    delBtn.disabled = isNew;
+  };
+  sel.onchange = setMode; syncSel(); setMode();
+
+  const save = async () => {
+    const key = nameI.value.trim();
+    if (!key) return;
+    const existing = sel.value !== _NEW;
+    const body = { action: existing ? 'update' : 'add', target: opts.target, path: opts.path || [], key };
+    if (valI) body.value = valI.value.trim() || (opts.nameIsValue ? key : '');
+    else if (opts.nameIsValue) body.value = key;
+    saveBtn.disabled = delBtn.disabled = true;
+    const r = await _entryFetch(body);
+    if (r.error) { saveBtn.disabled = false; delBtn.disabled = sel.value === _NEW; return toast(r.error); }
+    toast((existing ? 'saved → ' : 'added → ') + key);
+    if (opts.onDone) opts.onDone(key);
+    await reloadPresets();
+    syncSel(); if (!existing) sel.value = key; setMode();
+  };
+  const del = async () => {
+    const key = sel.value;
+    if (key === _NEW || !confirm(`delete "${key}" from ${opts.target}?`)) return;
+    saveBtn.disabled = delBtn.disabled = true;
+    const r = await _entryFetch({ action: 'delete', target: opts.target, path: opts.path || [], key });
+    if (r.error) { saveBtn.disabled = false; delBtn.disabled = false; return toast(r.error); }
+    toast('deleted ' + key);
+    await reloadPresets();
+    syncSel(); setMode();
+  };
+  saveBtn.onclick = save; delBtn.onclick = del;
+  for (const inp of [nameI, valI]) if (inp) inp.addEventListener('keydown', e => { if (e.key === 'Enter') save(); });
+
+  return el('div', { class: 'addrow' }, valI ? [sel, nameI, valI, saveBtn, delBtn] : [sel, nameI, saveBtn, delBtn]);
+}
+
+function themeEditBox() {
+  const F = ['style', 'setting_bias', 'palette', 'lighting', 'negative_add'];
+  const names = () => (PRESETS.themes || []).map(t => t.name).filter(n => n && n !== 'none');
+  const sel = el('select', {});
+  const nameI = el('input', { type: 'text', placeholder: 'theme name' });
+  const fin = {}; F.forEach(k => fin[k] = el('input', { type: 'text', placeholder: k }));
+  const saveBtn = el('button', { class: 'small' }, 'Add');
+  const delBtn = el('button', { class: 'small del' }, '🗑 delete');
+
+  const syncSel = () => {
+    const cur = sel.value;
+    sel.innerHTML = '';
+    for (const o of [_NEW, ...names()]) sel.append(el('option', {}, o));
+    sel.value = [...sel.options].some(o => o.value === cur) ? cur : _NEW;
+  };
+  const setMode = () => {
+    const k = sel.value, isNew = k === _NEW;
+    const t = isNew ? {} : ((PRESETS.themes || []).find(x => x.name === k) || {});
+    nameI.value = isNew ? '' : k;
+    nameI.readOnly = !isNew;
+    F.forEach(x => fin[x].value = t[x] || '');
+    saveBtn.textContent = isNew ? 'Add' : 'Save';
+    delBtn.disabled = isNew;
+  };
+  sel.onchange = setMode; syncSel(); setMode();
+
+  saveBtn.onclick = async () => {
+    const key = nameI.value.trim();
+    if (!key) return;
+    const existing = sel.value !== _NEW;
+    const fields = {}; F.forEach(k => fields[k] = fin[k].value.trim());
+    saveBtn.disabled = true;
+    const r = await _entryFetch({ action: existing ? 'update' : 'add', target: 'themes', key, fields });
+    saveBtn.disabled = false;
+    if (r.error) return toast(r.error);
+    toast((existing ? 'saved theme → ' : 'added theme → ') + key);
+    await reloadPresets();
+    $('#theme').value = key; persist(); schedulePreview();
+    syncSel(); sel.value = key; setMode();
+  };
+  delBtn.onclick = async () => {
+    const key = sel.value;
+    if (key === _NEW || !confirm(`delete theme "${key}"?`)) return;
+    delBtn.disabled = true;
+    const r = await _entryFetch({ action: 'delete', target: 'themes', key });
+    if (r.error) { delBtn.disabled = false; return toast(r.error); }
+    toast('deleted theme ' + key);
+    await reloadPresets();
+    syncSel(); setMode();
+  };
+  return el('details', { class: 'presetEd' }, [
+    el('summary', {}, '✎ themes'), sel, nameI, ...F.map(k => fin[k]),
+    el('div', { class: 'row' }, [saveBtn, delBtn]),
+  ]);
+}
+
+async function newPresetCharacter() {
+  const name = (prompt('New character name (saved as <name>.yaml):', '') || '').trim();
+  if (!name) return;
+  const tpl = await fetch('/api/character-template').then(r => r.json()).catch(() => ({}));
+  let body = tpl.yaml || 'name: New Character\nweight: 1.0\nbase: >\n  1girl\nnegative_add: ""\n';
+  body = body.replace(/^name:.*$/m, 'name: ' + name);
+  const r = await fetch('/api/save-character', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename: name, spec_yaml: body }),
+  }).then(r => r.json()).catch(() => ({ error: 'request failed' }));
+  if (r.error) return toast(r.error);
+  const created = r.saved.split('/').pop().replace(/\.ya?ml$/, '');
+  toast('created → ' + created + ' (open “✎ edit preset” to flesh it out)');
+  await reloadPresets();
+  if (state.chars.length < 2) {
+    const c = blankChar(); c.source = 'preset'; c.name = created;
+    const p = PRESETS.characters.preset.find(x => x.name === created);
+    c.outfit = outfitFromPointer(p && p.default_outfit);
+    state.chars.push(c); renderChars(); schedulePreview();
+  }
+}
+
+function installAddBoxes() {
+  $('#theme').insertAdjacentElement('afterend', themeEditBox());
+  $('#settingText').insertAdjacentElement('afterend',
+    addEntryRow({ target: 'backgrounds', keys: () => PRESETS.backgrounds }));
+  $('#styleText').insertAdjacentElement('afterend',
+    addEntryRow({ target: 'styles', keys: () => PRESETS.styles }));
+  $('#addChar').insertAdjacentElement('afterend',
+    el('button', { class: 'small', style: 'margin-left:6px', onclick: newPresetCharacter }, '＋ new preset'));
 }
 
 async function comfyStatus() {
@@ -148,7 +329,11 @@ function charCard(c, i) {
   if (!exprList.includes(c.expression)) c.expression = exprList[0] || 'flat';
   const expSel = el('select', { onchange: e => { c.expression = e.target.value; schedulePreview(); } }, exprList.map(o => el('option', {}, o)));
   expSel.value = c.expression;
-  const exprRow = () => el('div', {}, [el('label', {}, 'Expression'), expSel]);
+  const exprRow = () => el('div', {}, [
+    el('label', {}, 'Expression'), expSel,
+    addEntryRow({ target: 'expressions', keys: () => PRESETS.expressions,
+      onDone: k => { c.expression = k; } }),
+  ]);
 
   // Outfits are a universal 4-level pool (data/outfits.yaml): gender -> genre ->
   // subgenre -> outfit. Changing an upper level clears the levels below it and
@@ -171,6 +356,25 @@ function charCard(c, i) {
     const sgSel = dashSelect(L3, o.subgenre, v => { o.subgenre = v; o.key = ''; renderChars(); schedulePreview(); });
     const kSel = dashSelect(L4, o.key, v => { o.key = v; schedulePreview(); });
 
+    // Adaptive add row: adds a child at the deepest level the cascade has filled
+    // (nothing set -> new gender; gender set -> new genre; ... all set -> new outfit).
+    const oPath = [];
+    if (o.gender) oPath.push(o.gender);
+    if (o.gender && o.genre) oPath.push(o.genre);
+    if (o.gender && o.genre && o.subgenre) oPath.push(o.subgenre);
+    const lvl = oPath.length;   // 0..3 -> gender / genre / subgenre / outfit
+    const branchKeys = () => lvl === 0 ? Object.keys(T)
+      : lvl === 1 ? Object.keys(T[o.gender] || {})
+      : Object.keys((T[o.gender] || {})[o.genre] || {});
+    const leafMap = () => (((T[o.gender] || {})[o.genre] || {})[o.subgenre]) || {};
+    const outfitAdd = addEntryRow({
+      target: 'outfits', path: oPath,
+      branchOnly: lvl < 3,
+      keys: lvl === 3 ? () => Object.keys(leafMap()) : branchKeys,
+      getValue: lvl === 3 ? (k => leafMap()[k] || '') : undefined,
+      onDone: k => { [() => o.gender = k, () => o.genre = k, () => o.subgenre = k, () => o.key = k][lvl](); },
+    });
+
     const colorOpts = PRESETS.colors || [];
     const colorCell = slot => {
       const eff = c.colors[slot] || '';
@@ -186,8 +390,10 @@ function charCard(c, i) {
     return [
       el('label', {}, 'Outfit'),
       el('div', { class: 'grid4' }, [gSel, geSel, sgSel, kSel]),
+      outfitAdd,
       el('label', {}, 'Clothing colour'),
       el('div', { class: 'grid3' }, ['base', 'contrast', 'detail'].map(colorCell)),
+      addEntryRow({ target: 'colors', keys: () => PRESETS.colors, getValue: k => k, nameIsValue: true }),
     ];
   };
 
@@ -258,14 +464,28 @@ function presetEditor(name) {
 }
 
 // ------------------------------------------------------------- skeleton
-function syncEditor() {
+// `state._rigs` is the durable in-memory copy of the working pose (kept fresh by the
+// editor onChange callback). Ordinary re-renders must NOT re-seed from `lastLibFrame` —
+// that discarded manual tweaks on every outfit/name change. `lastLibFrame` is only used
+// for an explicit "Reset pose" (fromLib) or a genuinely empty editor.
+function syncEditor(fromLib = false) {
   const n = state.chars.length;
   $('#editorSection').style.display = n ? '' : 'none';
   if (!n || !editor) return;
-  const lib = (state._rigs && state._rigs.length === n) ? { rigs: state._rigs }
-    : (lastLibFrame && (lastLibFrame.rigs || lastLibFrame.rig) ? lastLibFrame : null);
-  editor.setCount(n, lib);
-  state._rigs = null;
+  const havLib = lastLibFrame && (lastLibFrame.rigs || lastLibFrame.rig);
+  if (fromLib && havLib) {
+    editor.setCount(n, lastLibFrame);
+  } else if (state._rigs && state._rigs.length === n) {
+    editor.setCount(n, { rigs: state._rigs });          // carry the live pose (normal path)
+  } else if (state._rigs && state._rigs.length) {
+    editor.setCount(n, null);                           // count changed: keep figure A…
+    editor.loadRig({ rigs: state._rigs });              // …then re-apply the saved figures
+  } else if (editor.rigs.length === 0 && havLib) {
+    editor.setCount(n, lastLibFrame);
+  } else {
+    editor.setCount(n, null);                           // keep whatever the editor holds
+  }
+  state._rigs = editor.getRigs();                       // keep it populated, never null
   editor.setCam(state.yaw * Math.PI, state.pitch * 1.15);   // inverse of exportYawPitch
   updateOrientLbl();
   buildEditorTools();
@@ -277,7 +497,7 @@ function buildEditorTools() {
   wrap.append(el('div', { class: 'undoredo' }, [
     el('button', { class: 'small', onclick: () => editor.undo() }, '↶ undo'),
     el('button', { class: 'small', onclick: () => editor.redo() }, '↷ redo'),
-    el('span', { class: 'muted', style: 'font-size:10px;align-self:center' }, 'drag a joint to pose · hands/feet use IK'),
+    el('span', { class: 'muted', style: 'font-size:10px;align-self:center' }, 'drag a joint to pose · hands/feet use IK · scroll a joint = depth · drag empty space to orbit'),
   ]));
   editor.rigs.forEach((r, fi) => {
     const head = el('div', { class: 'row' }, [
@@ -319,9 +539,11 @@ async function loadPose() {
   if (!pos) return;
   const d = await fetch(`/api/pose/${encodeURIComponent(pos)}`).then(r => r.json());
   if (d.error) return toast(d.error);
-  lastLibFrame = d;                 // {rig} | {rigs}
+  lastLibFrame = d;                 // {rig} | {rigs} — the base for "Reset pose"
   state.poseName = pos;
   editor.loadRig(d);
+  if ($('#poseKeywords')) $('#poseKeywords').value = d.tags || '';   // pose's saved keywords
+  state._rigs = editor.getRigs(); persist();
   buildEditorTools();
 }
 
@@ -329,7 +551,7 @@ async function savePose() {
   const name = prompt('Save pose as (name — the pose only, no camera angle):',
     state.poseName || 'my_pose');
   if (!name) return;
-  const tags = prompt('Pose tags for the prompt (e.g. "kneeling, hands on thighs"):', '') || '';
+  const tags = ($('#poseKeywords')?.value || '').trim();   // stored as the pose's keywords
   const rigs = editor.getRigs();
   const body = { position: name, position_tags: tags, people: rigs.length, overwrite: true };
   if (rigs.length > 1) body.rigs = rigs; else body.rig = rigs[0];
@@ -369,8 +591,11 @@ function buildSpec() {
     spec.skeleton = { people: editor.getFrame(spec.width, spec.height).people };
     spec.pose_rigs = editor.getRigs();   // so a re-used image restores the rig
   }
-  // carry the pose name for its prompt tags even when an edited skeleton is sent
+  // carry the pose name so a re-used image / API caller can resolve the stored
+  // rig; its tags are no longer injected into the prompt
   if (state.poseName) spec.pose_position = state.poseName;
+  const pk = ($('#poseKeywords')?.value || '').trim();
+  if (pk) spec.pose_keywords = pk;   // the only pose text that reaches the prompt
   // orbit camera -> exported facing (skeleton is pre-oriented; these drive tags)
   if (state.yaw) spec.yaw = state.yaw;
   if (state.pitch) spec.pitch = state.pitch;
@@ -489,6 +714,7 @@ function applySpec(spec) {
   if (spec.setting) $('#settingText').value = spec.setting;
   if (spec.negative) $('#negative').value = spec.negative;
   if (spec.layout) $('#layout').value = spec.layout;
+  if ($('#poseKeywords')) $('#poseKeywords').value = spec.pose_keywords || '';
   state.poseName = spec.pose_position || null;
   state.yaw = spec.yaw || 0;
   state.pitch = spec.pitch || 0;
@@ -503,6 +729,7 @@ function persist() {
       chars: state.chars, form: formValues(),
       poseName: state.poseName, yaw: state.yaw, pitch: state.pitch,
       rigs: editor ? editor.getRigs() : null,
+      libFrame: lastLibFrame,
     });
   } catch { }
 }
@@ -520,6 +747,7 @@ function restore() {
     state.yaw = s.yaw || 0;
     state.pitch = s.pitch || 0;
     state._rigs = (s.rigs && s.rigs.length) ? s.rigs : null;
+    lastLibFrame = s.libFrame || null;
   } catch { state.chars = []; }
 }
 

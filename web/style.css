@@ -60,6 +60,13 @@ details > summary { cursor: pointer; font-size: 11px; text-transform: uppercase;
 .grid3 select, .grid3 input, .grid4 select { min-width: 0; width: 100%; }
 .grid3 > div { display: flex; flex-direction: column; gap: 3px; }
 
+.addrow { display: flex; gap: 4px; margin: 4px 0 6px; flex-wrap: wrap; }
+.addrow select { flex: 1 1 38%; min-width: 0; }
+.addrow input { flex: 2 1 40%; min-width: 0; }
+.addrow button { flex: 0 0 auto; }
+.addrow .del { filter: grayscale(1); opacity: .8; }
+details.presetEd input[type=text] { width: 100%; margin: 3px 0; }
+
 .card .inject { white-space: pre-wrap; word-break: break-word;
                 background: var(--bg); border: 1px solid var(--border); border-radius: 5px;
                 padding: 6px 7px; font-size: 11px; line-height: 1.45; color: var(--muted);

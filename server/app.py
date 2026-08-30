@@ -205,6 +205,41 @@ def save_char():
     return jsonify({"saved": path})
 
 
+@app.route("/api/character-template")
+def character_template():
+    path = os.path.join(data.CHAR_DIR, "_TEMPLATE.yaml")
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return jsonify({"yaml": fh.read()})
+    except OSError as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 404
+
+
+@app.route("/api/entry", methods=["POST"])
+def entry_op():
+    """Add / update / delete one entry in a data YAML from the UI's inline boxes.
+    `action`: "add" (default) | "update" | "delete" | "get" (read current value)."""
+    b = request.get_json(force=True, silent=True) or {}
+    action = b.get("action", "add")
+    try:
+        if action == "get":
+            tgt = b["target"]
+            v = data.get_entry(tgt, b["key"])[0] if tgt in data.CATEGORIES else ""
+            return jsonify({"value": v})
+        tgt, path, key = b["target"], b.get("path") or [], b["key"]
+        if action == "update":
+            saved = data.update_entry(tgt, path, key,
+                                      value=b.get("value"), fields=b.get("fields"))
+        elif action == "delete":
+            saved = data.delete_entry(tgt, path, key)
+        else:
+            saved = data.add_entry(tgt, path, key,
+                                   value=b.get("value"), fields=b.get("fields"))
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"saved": saved})
+
+
 @app.route("/api/randomize-character", methods=["POST"])
 def randomize_character():
     b = request.get_json(force=True, silent=True) or {}
@@ -343,13 +378,14 @@ def resolve_job(spec):
     # pose / skeleton
     #
     # Two independent things come out of here:
-    #   - `frame`: COCO-18 keypoints that become the ControlNet skeleton PNG
-    #   - `pose_tags`: pose/action + camera words that go into the *prompt*
-    # The editor projects its live 3-D rig through the orbit camera and sends
-    # the result as `skeleton.people` (already oriented — do not re-project it).
-    # An API caller may instead pass only `pose_position` (+ yaw/pitch); then we
-    # load the stored rig and project it here. Camera tags are derived from
-    # yaw/pitch either way so a hidden pose still reads in the prompt.
+    #   - `frame`: COCO-18 keypoints that become the ControlNet skeleton PNG —
+    #     this alone drives the pose.
+    #   - `pose_tags`: ONLY orbit-camera facing words (from yaw/pitch). A library
+    #     pose's own `tags` (e.g. "standing, arms at sides") are deliberately NOT
+    #     put in the prompt — they used to fight an edited skeleton.
+    # The editor sends its live 3-D rig projection as `skeleton.people` (already
+    # oriented — do not re-project it). An API caller may instead pass only
+    # `pose_position` (+ yaw/pitch); then we project the stored rig here.
     pose_tags = ""
     frame = None
     sk = spec.get("skeleton") or {}
@@ -357,18 +393,20 @@ def resolve_job(spec):
     yaw = float(spec.get("yaw", 0.0) or 0.0)
     pitch = float(spec.get("pitch", 0.0) or 0.0)
     az, el = yaw * 3.141592653589793, pitch * 1.15   # inverse of editor exportYawPitch
-    if pos_name:
-        _rig, ptags = data.cn_canonical_rig(pos_name)
-        pose_tags = data.normalize_kw(ptags, data.orientation_tags(yaw, pitch))
-        if not sk.get("people") and _rig is not None:
-            frame = rig.project_frame(_rig, az, el, j["width"], j["height"])
-    elif yaw or pitch:
+    if yaw or pitch:
         pose_tags = data.orientation_tags(yaw, pitch)
+    pk = (spec.get("pose_keywords") or "").strip()
+    if pk:
+        pose_tags = data.normalize_kw(pose_tags, pk)
+    if pos_name and not sk.get("people"):
+        # API fallback: a pose name but no edited skeleton -> project the stored rig.
+        _rig, _ = data.cn_canonical_rig(pos_name)
+        if _rig is not None:
+            frame = rig.project_frame(_rig, az, el, j["width"], j["height"])
     if sk.get("people"):
         frame = {"people": sk["people"],
                  "canvas_width": j["width"], "canvas_height": j["height"]}
-    # skip ControlNet entirely if the projected skeleton has no usable joints
-    # (a flat rig seen edge-on) — let the prompt carry the pose
+    # skip ControlNet if the projected skeleton collapsed to nothing usable
     if frame is not None and _frame_has_joints(frame):
         frame = pose_ops.transform(frame, canvas_w=j["width"], canvas_h=j["height"])
         j["skeleton_png"] = pose_ops.render_png(frame, j["width"], j["height"])
