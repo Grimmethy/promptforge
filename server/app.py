@@ -5,6 +5,7 @@ delegated to ComfyUI (:8188) — see core/comfy.py (added next). Bind 127.0.0.1.
 """
 
 import json
+import logging
 import os
 import re
 import urllib.error
@@ -14,6 +15,8 @@ from flask import Flask, Response, jsonify, request, send_from_directory
 
 from core import (assemble, comfy, data, pose_ops, randomizer, rig, secondbrain,
                   themes, thumbs)
+
+logger = logging.getLogger(__name__)
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(os.path.dirname(_HERE), "web")
@@ -60,7 +63,8 @@ def list_checkpoints():
         oi = _comfy_get("/object_info/CheckpointLoaderSimple")
         opts = oi["CheckpointLoaderSimple"]["input"]["required"]["ckpt_name"][0]
         return list(opts)
-    except Exception:
+    except Exception as exc:
+        logger.warning("list_checkpoints: ComfyUI checkpoint query failed: %s", exc)
         return []
 
 
