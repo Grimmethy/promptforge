@@ -679,48 +679,84 @@ async function pollJob(jid, tile, meta) {
     if (j.status === 'running' && bar) bar.style.width = Math.min(90, 10 + i * 4) + '%';
     if (j.status === 'error') { tile.querySelector('.spin').textContent = '⚠ ' + (j.error || 'error'); return; }
     if (j.status === 'done') {
-      tile.replaceWith(...j.images.map(f => imgTile(f, { meta: { ...meta, seed: j.seed, spec: (buildSpec()), prompt_used: j.prompt_used } })));
+      tile.replaceWith(...j.images.map(f => imgTile(f, { ...meta, seed: j.seed, spec: buildSpec(), prompt_used: j.prompt_used })));
       return;
     }
   }
   tile.querySelector('.spin').textContent = 'timed out';
 }
 
-function imgTile(file, item) {
-  const m = item.meta || {};
+// `meta` may be pre-supplied (fresh generation); otherwise it's fetched from
+// /api/gallery-meta only when a menu action or the lightbox actually needs it.
+function imgTile(file, meta = null) {
+  let _m = meta;
+  const getMeta = async () => _m || (_m = await fetch('/api/gallery-meta/' + file).then(r => r.json()).catch(() => ({})));
   const menu = el('div', { class: 'menu row' }, [
-    mBtn('♻', 'reuse settings', () => { if (m.spec) applySpec(m.spec); }),
-    mBtn('⧉', 'copy prompt', () => { navigator.clipboard.writeText(JSON.stringify(m.prompt_used || {}, null, 1)); toast('prompt copied'); }),
-    mBtn('🦴', 'send pose to editor', () => {
-      const rigs = m.spec?.pose_rigs;
+    mBtn('♻', 'reuse settings', async () => { const m = await getMeta(); if (m.spec) applySpec(m.spec); }),
+    mBtn('⧉', 'copy prompt', async () => { const m = await getMeta(); navigator.clipboard.writeText(JSON.stringify(m.prompt_used || {}, null, 1)); toast('prompt copied'); }),
+    mBtn('🦴', 'send pose to editor', async () => {
+      const rigs = (await getMeta()).spec?.pose_rigs;
       if (rigs?.length && editor) { editor.loadRig({ rigs }); toast('pose loaded'); }
       else toast('no rig saved for this image');
     }),
-    mBtn('⬇', 'download', () => { const a = el('a', { href: '/api/image/' + file, download: file }); a.click(); }),
+    mBtn('⬇', 'download', () => { const a = el('a', { href: '/api/image/' + file, download: file.split('/').pop() }); a.click(); }),
     mBtn('🗑', 'delete', async () => { await fetch('/api/image/' + file, { method: 'DELETE' }); tile.remove(); }),
   ]);
-  const img = el('img', { src: '/api/image/' + file, loading: 'lazy', onclick: () => openLB(file, m) });
-  const tile = el('div', { class: 'tile' }, [img, menu]);
+  const img = el('img', { src: '/api/thumb/' + file, loading: 'lazy', onclick: async () => openLB(file, await getMeta()) });
+  const done = () => tile.classList.remove('loading');
+  img.addEventListener('load', done); img.addEventListener('error', done);
+  const tile = el('div', { class: 'tile loading' }, [img, menu]);
   return tile;
 }
 const mBtn = (t, title, fn) => el('button', { class: 'x', title, onclick: fn }, t);
 
 function openLB(file, meta) {
-  $('#lbImg').src = '/api/image/' + file;
+  $('#lbImg').src = '/api/image/' + file;               // full-res in the lightbox
   $('#lbInfo').innerHTML = '';
-  const p = meta.prompt_used || {};
+  const p = (meta || {}).prompt_used || {};
   $('#lbInfo').append(
-    el('div', {}, `seed ${meta.seed ?? '?'} · ${meta.model || ''}`),
+    el('div', {}, `seed ${meta?.seed ?? '?'} · ${meta?.model || ''}`),
     el('pre', { html: (p.positive || [p.region_a, p.region_b, p.base].filter(Boolean).join('\n\nBREAK\n')) || '' }),
     el('pre', { html: p.negative || '' }));
   $('#lightbox').classList.add('on');
 }
 $('#lightbox').onclick = e => { if (e.target.id === 'lightbox') e.currentTarget.classList.remove('on'); };
 
-async function loadGallery() {
-  const items = await fetch('/api/gallery').then(r => r.json());
-  const g = $('#gallery'); g.innerHTML = '';
-  items.forEach(it => g.append(imgTile(it.file, it)));
+// ---- paged gallery with a shimmering skeleton loader ----
+let _galOffset = 0, _galTotal = 0, _galLoading = false;
+const _GAL_PAGE = 48;
+let _galObserver = null;
+
+function _skelTiles(n) {
+  return Array.from({ length: n }, () => el('div', { class: 'tile skel' }));
+}
+
+async function loadGallery(reset = true) {
+  if (_galLoading) return;
+  const g = $('#gallery');
+  if (reset) {
+    _galOffset = 0; _galTotal = 0;
+    g.innerHTML = '';
+    g.append(..._skelTiles(12));   // placeholders while page 1 loads
+  }
+  if (_galOffset && _galOffset >= _galTotal) return;
+  _galLoading = true;
+  try {
+    const r = await fetch(`/api/gallery?offset=${_galOffset}&limit=${_GAL_PAGE}`)
+      .then(r => r.json()).catch(() => ({ items: [], total: 0 }));
+    if (reset) g.innerHTML = '';
+    const old = $('#gallerySentinel'); if (old) old.remove();
+    (r.items || []).forEach(it => g.append(imgTile(it.file)));
+    _galOffset += (r.items || []).length;
+    _galTotal = r.total || _galOffset;
+    if (_galOffset < _galTotal) {
+      const s = el('div', { id: 'gallerySentinel', style: 'grid-column:1/-1;height:1px' });
+      g.append(s);
+      (_galObserver || (_galObserver = new IntersectionObserver(
+        es => { if (es.some(e => e.isIntersecting)) loadGallery(false); },
+        { root: g, rootMargin: '800px' }))).observe(s);
+    }
+  } finally { _galLoading = false; }
 }
 
 // ------------------------------------------------------------- persistence

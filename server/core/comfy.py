@@ -198,21 +198,29 @@ def _run(job, rec, gallery_dir):
                 return
             outs = entry.get("outputs", {})
             saved = []
-            os.makedirs(gallery_dir, exist_ok=True)
+            subdir = time.strftime("%Y-%m")
+            outdir = os.path.join(gallery_dir, subdir)
+            os.makedirs(outdir, exist_ok=True)
             for node_out in outs.values():
                 for i, im in enumerate(node_out.get("images", [])):
                     data = fetch_view(im["filename"], im.get("subfolder", ""),
                                       im.get("type", "output"))
                     fn = f"{job['id'][:8]}_{i}.png"
-                    with open(os.path.join(gallery_dir, fn), "wb") as fh:
+                    with open(os.path.join(outdir, fn), "wb") as fh:
                         fh.write(data)
-                    saved.append(fn)
+                    rel = f"{subdir}/{fn}"
+                    saved.append(rel)
+                    try:
+                        from . import thumbs
+                        thumbs.ensure_thumb(gallery_dir, rel)
+                    except Exception:  # noqa: BLE001
+                        pass
             if saved:
                 sidecar = {"id": job["id"], "seed": job["seed"],
                            "model": job["model"], "spec": job.get("spec"),
                            "prompt_used": job.get("prompt_used"),
                            "images": saved, "ts": time.time()}
-                with open(os.path.join(gallery_dir, f"{job['id'][:8]}.json"), "w") as fh:
+                with open(os.path.join(outdir, f"{job['id'][:8]}.json"), "w") as fh:
                     json.dump(sidecar, fh, indent=1)
                 _set(rec, status="done", images=saved)
                 return

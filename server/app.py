@@ -12,7 +12,8 @@ import urllib.request
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from core import assemble, comfy, data, pose_ops, randomizer, rig, secondbrain, themes
+from core import (assemble, comfy, data, pose_ops, randomizer, rig, secondbrain,
+                  themes, thumbs)
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(os.path.dirname(_HERE), "web")
@@ -26,6 +27,10 @@ app = Flask(__name__, static_folder=None)
 def _no_frame_block(resp):
     # embedded as an <iframe> in the agent-manager dashboard
     resp.headers.pop("X-Frame-Options", None)
+    # gallery images/thumbs are uuid-addressed -> cache them hard
+    if resp.status_code == 200 and (request.path.startswith("/api/image/")
+                                    or request.path.startswith("/api/thumb/")):
+        resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
     return resp
 
 
@@ -482,40 +487,99 @@ def job(jid):
     return jsonify(rec)
 
 
+def _gallery_pngs():
+    """(relpath, mtime) for every gallery PNG, recursing month sub-dirs, skipping
+    the hidden .thumbs cache. Newest first."""
+    rows = []
+    for root, dirs, files in os.walk(GALLERY_DIR):
+        dirs[:] = [d for d in dirs if d != thumbs.THUMB_SUBDIR]
+        for f in files:
+            if f.endswith(".png"):
+                fp = os.path.join(root, f)
+                try:
+                    rows.append((os.path.relpath(fp, GALLERY_DIR), os.path.getmtime(fp)))
+                except OSError:
+                    pass
+    rows.sort(key=lambda r: r[1], reverse=True)
+    return rows
+
+
+def _safe_gallery_path(name):
+    """Resolve a client-supplied gallery relpath, refusing anything outside."""
+    p = os.path.abspath(os.path.join(GALLERY_DIR, name))
+    root = os.path.abspath(GALLERY_DIR)
+    return p if (p == root or p.startswith(root + os.sep)) else None
+
+
 @app.route("/api/gallery")
 def gallery():
-    """Newest-first list of gallery images with their sidecar metadata."""
-    items = []
+    """Newest-first page of gallery image relpaths (no sidecar meta — see
+    /api/gallery-meta). ?offset= &limit= for infinite scroll."""
     if not os.path.isdir(GALLERY_DIR):
-        return jsonify(items)
-    pngs = [f for f in os.listdir(GALLERY_DIR) if f.endswith(".png")]
-    pngs.sort(key=lambda f: os.path.getmtime(os.path.join(GALLERY_DIR, f)), reverse=True)
-    side_cache = {}
-    for f in pngs:
-        stem = f.split("_")[0]
-        if stem not in side_cache:
-            sp = os.path.join(GALLERY_DIR, f"{stem}.json")
-            try:
-                with open(sp) as fh:
-                    side_cache[stem] = json.load(fh)
-            except OSError:
-                side_cache[stem] = {}
-        items.append({"file": f, "meta": side_cache[stem]})
-    return jsonify(items)
+        return jsonify({"items": [], "total": 0, "offset": 0, "limit": 0})
+    try:
+        offset = max(0, int(request.args.get("offset", 0)))
+        limit = max(1, min(500, int(request.args.get("limit", 60))))
+    except ValueError:
+        offset, limit = 0, 60
+    rows = _gallery_pngs()
+    page = rows[offset:offset + limit]
+    return jsonify({
+        "items": [{"file": rel, "ts": ts} for rel, ts in page],
+        "total": len(rows), "offset": offset, "limit": limit,
+    })
+
+
+@app.route("/api/gallery-meta/<path:name>")
+def gallery_meta(name):
+    """The sidecar dict for a gallery image relpath (spec / prompt_used / seed …)."""
+    p = _safe_gallery_path(name)
+    if not p:
+        return jsonify({}), 400
+    d, base = os.path.split(p)
+    sp = os.path.join(d, base.split("_")[0] + ".json")
+    try:
+        with open(sp) as fh:
+            return jsonify(json.load(fh))
+    except OSError:
+        return jsonify({})
+
+
+@app.route("/api/thumb/<path:name>")
+def thumb(name):
+    """Cached ~512px WebP thumbnail for a gallery image (lazily generated)."""
+    dst = thumbs.ensure_thumb(GALLERY_DIR, name)
+    if not dst:
+        return send_from_directory(GALLERY_DIR, name)   # fall back to the original
+    return send_from_directory(GALLERY_DIR, os.path.relpath(dst, GALLERY_DIR))
 
 
 @app.route("/api/image/<path:name>", methods=["GET", "DELETE"])
 def image(name):
+    p = _safe_gallery_path(name)
+    if not p:
+        return jsonify({"error": "bad path"}), 400
     if request.method == "DELETE":
-        safe = os.path.basename(name)
-        p = os.path.join(GALLERY_DIR, safe)
+        deleted = []
         if os.path.isfile(p):
             os.remove(p)
-        return jsonify({"deleted": safe})
+            deleted.append(name)
+        d, base = os.path.split(p)
+        stem = base.split("_")[0]
+        tp = os.path.join(d, thumbs.THUMB_SUBDIR, os.path.splitext(base)[0] + ".webp")
+        if os.path.isfile(tp):
+            os.remove(tp)
+        # drop the sidecar once no image for that job remains
+        if os.path.isdir(d) and not any(
+                f.startswith(stem + "_") and f.endswith(".png") for f in os.listdir(d)):
+            sp = os.path.join(d, stem + ".json")
+            if os.path.isfile(sp):
+                os.remove(sp)
+        return jsonify({"deleted": deleted})
     return send_from_directory(GALLERY_DIR, name)
 
 
 if __name__ == "__main__":
     os.makedirs(GALLERY_DIR, exist_ok=True)
     app.run(host="127.0.0.1", port=int(os.environ.get("PROMPTFORGE_PORT", 7430)),
-            debug=bool(os.environ.get("PROMPTFORGE_DEBUG")))
+            debug=bool(os.environ.get("PROMPTFORGE_DEBUG")), threaded=True)

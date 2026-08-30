@@ -110,7 +110,18 @@ details.presetEd textarea.yaml { width: 100%; margin: 6px 0; font: 11px/1.4 ui-m
 .tile { position: relative; border: 1px solid var(--border); border-radius: 7px;
         overflow: hidden; background: var(--panel);
         display: flex; align-items: center; justify-content: center; }
-.tile img { width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; display: block; }
+.tile img { width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; display: block;
+            opacity: 1; transition: opacity .2s; }
+/* shimmering skeleton: page-load placeholders (.skel) and each tile until its img decodes (.loading) */
+@keyframes pf-shimmer { to { background-position: -200% 0; } }
+.tile.skel, .tile.loading::before {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(100deg,
+    var(--panel) 30%, var(--panel2) 48%, var(--panel2) 52%, var(--panel) 70%);
+  background-size: 200% 100%;
+  animation: pf-shimmer 1.15s linear infinite;
+}
+.tile.loading img { opacity: 0; }
 .tile .bar { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--a); }
 .tile .menu { position: absolute; top: 4px; right: 4px; opacity: 0; transition: opacity .1s; }
 .tile:hover .menu { opacity: 1; }
