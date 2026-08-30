@@ -60,12 +60,16 @@ details > summary { cursor: pointer; font-size: 11px; text-transform: uppercase;
 .grid3 select, .grid3 input, .grid4 select { min-width: 0; width: 100%; }
 .grid3 > div { display: flex; flex-direction: column; gap: 3px; }
 
-.addrow { display: flex; gap: 4px; margin: 4px 0 6px; flex-wrap: wrap; }
-.addrow select { flex: 1 1 38%; min-width: 0; }
-.addrow input { flex: 2 1 40%; min-width: 0; }
+.addrow { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 8px; }
+.addrow > select, .addrow > input, .addrow > .tagbox { flex: 1 1 100%; min-width: 0; }
 .addrow button { flex: 0 0 auto; }
-.addrow .del { filter: grayscale(1); opacity: .8; }
+.addrow .del { filter: grayscale(1); opacity: .85; }
 details.presetEd input[type=text] { width: 100%; margin: 3px 0; }
+
+/* roomy, wrapping tag editor — mirrors the injected-prompt panel */
+.tagbox { width: 100%; white-space: pre-wrap; overflow-wrap: anywhere;
+          font-size: 11px; line-height: 1.5; min-height: 3.6em; max-height: 180px;
+          resize: vertical; }
 
 .card .inject { white-space: pre-wrap; word-break: break-word;
                 background: var(--bg); border: 1px solid var(--border); border-radius: 5px;

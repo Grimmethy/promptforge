@@ -88,16 +88,18 @@ async function _entryFetch(body) {
   }).then(r => r.json()).catch(() => ({ error: 'request failed' }));
 }
 
-// opts: { target, path?, keys, getValue?, branchOnly?, nameIsValue?, onDone? }
+// opts: { target, path?, keys, getValue?, current?, branchOnly?, nameIsValue?, onDone? }
 //   keys()      -> current entry keys for this category (re-read live)
 //   getValue(k) -> current value, sync (outfit tree / colours); omit for a lazy
 //                  POST {action:"get"} (flat pools)
+//   current()   -> the key currently picked in the associated main picker, so the
+//                  box comes up editing that entry (falsy -> starts on "＋ new…")
 //   branchOnly  -> no value box; add-name-only + delete (outfit gender/genre/subgenre)
 function addEntryRow(opts) {
   const keyList = () => (opts.keys ? opts.keys() : []).filter(k => k && k !== 'none' && k !== '—' && k !== _NEW);
   const sel = el('select', {});
   const nameI = el('input', { type: 'text', placeholder: 'name' });
-  const valI = opts.branchOnly ? null : el('input', { type: 'text', placeholder: 'prompt tags' });
+  const valI = opts.branchOnly ? null : el('textarea', { class: 'tagbox', rows: 3, placeholder: 'prompt tags (⌃/⌘-Enter to save)' });
   const saveBtn = el('button', { class: 'small' }, 'Add');
   const delBtn = el('button', { class: 'small del', title: 'delete entry' }, '🗑');
 
@@ -105,7 +107,8 @@ function addEntryRow(opts) {
     const cur = sel.value;
     sel.innerHTML = '';
     for (const o of [_NEW, ...keyList()]) sel.append(el('option', {}, o));
-    sel.value = [...sel.options].some(o => o.value === cur) ? cur : _NEW;
+    const want = (cur && cur !== _NEW) ? cur : ((opts.current && opts.current()) || _NEW);
+    sel.value = [...sel.options].some(o => o.value === want) ? want : _NEW;
   };
   const setMode = async () => {
     const k = sel.value, isNew = k === _NEW;
@@ -145,9 +148,12 @@ function addEntryRow(opts) {
     syncSel(); setMode();
   };
   saveBtn.onclick = save; delBtn.onclick = del;
-  for (const inp of [nameI, valI]) if (inp) inp.addEventListener('keydown', e => { if (e.key === 'Enter') save(); });
+  nameI.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
+  if (valI) valI.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save(); } });
 
-  return el('div', { class: 'addrow' }, valI ? [sel, nameI, valI, saveBtn, delBtn] : [sel, nameI, saveBtn, delBtn]);
+  const row = el('div', { class: 'addrow' }, valI ? [sel, nameI, valI, saveBtn, delBtn] : [sel, nameI, saveBtn, delBtn]);
+  row._resync = () => { sel.value = _NEW; syncSel(); setMode(); };   // follow the main picker
+  return row;
 }
 
 function themeEditBox() {
@@ -155,7 +161,7 @@ function themeEditBox() {
   const names = () => (PRESETS.themes || []).map(t => t.name).filter(n => n && n !== 'none');
   const sel = el('select', {});
   const nameI = el('input', { type: 'text', placeholder: 'theme name' });
-  const fin = {}; F.forEach(k => fin[k] = el('input', { type: 'text', placeholder: k }));
+  const fin = {}; F.forEach(k => fin[k] = el('textarea', { class: 'tagbox', rows: 2, placeholder: k }));
   const saveBtn = el('button', { class: 'small' }, 'Add');
   const delBtn = el('button', { class: 'small del' }, '🗑 delete');
 
@@ -163,7 +169,8 @@ function themeEditBox() {
     const cur = sel.value;
     sel.innerHTML = '';
     for (const o of [_NEW, ...names()]) sel.append(el('option', {}, o));
-    sel.value = [...sel.options].some(o => o.value === cur) ? cur : _NEW;
+    const want = (cur && cur !== _NEW) ? cur : ($('#theme').value || _NEW);
+    sel.value = [...sel.options].some(o => o.value === want) ? want : _NEW;
   };
   const setMode = () => {
     const k = sel.value, isNew = k === _NEW;
@@ -200,10 +207,13 @@ function themeEditBox() {
     await reloadPresets();
     syncSel(); setMode();
   };
-  return el('details', { class: 'presetEd' }, [
-    el('summary', {}, '✎ themes'), sel, nameI, ...F.map(k => fin[k]),
+  const box = el('details', { class: 'presetEd' }, [
+    el('summary', {}, '✎ themes'), sel, nameI,
+    ...F.flatMap(k => [el('label', {}, k.replace(/_/g, ' ')), fin[k]]),
     el('div', { class: 'row' }, [saveBtn, delBtn]),
   ]);
+  box._resync = () => { sel.value = _NEW; syncSel(); setMode(); };
+  return box;
 }
 
 async function newPresetCharacter() {
@@ -229,11 +239,18 @@ async function newPresetCharacter() {
 }
 
 function installAddBoxes() {
-  $('#theme').insertAdjacentElement('afterend', themeEditBox());
-  $('#settingText').insertAdjacentElement('afterend',
-    addEntryRow({ target: 'backgrounds', keys: () => PRESETS.backgrounds }));
-  $('#styleText').insertAdjacentElement('afterend',
-    addEntryRow({ target: 'styles', keys: () => PRESETS.styles }));
+  const themeBox = themeEditBox();
+  $('#theme').insertAdjacentElement('afterend', themeBox);
+  $('#theme').addEventListener('change', () => themeBox._resync && themeBox._resync());
+
+  const settingBox = addEntryRow({ target: 'backgrounds', keys: () => PRESETS.backgrounds, current: () => $('#setting').value });
+  $('#settingText').insertAdjacentElement('afterend', settingBox);
+  $('#setting').addEventListener('change', () => settingBox._resync());
+
+  const styleBox = addEntryRow({ target: 'styles', keys: () => PRESETS.styles, current: () => $('#style').value });
+  $('#styleText').insertAdjacentElement('afterend', styleBox);
+  $('#style').addEventListener('change', () => styleBox._resync());
+
   $('#addChar').insertAdjacentElement('afterend',
     el('button', { class: 'small', style: 'margin-left:6px', onclick: newPresetCharacter }, '＋ new preset'));
 }
@@ -332,7 +349,7 @@ function charCard(c, i) {
   const exprRow = () => el('div', {}, [
     el('label', {}, 'Expression'), expSel,
     addEntryRow({ target: 'expressions', keys: () => PRESETS.expressions,
-      onDone: k => { c.expression = k; } }),
+      current: () => c.expression, onDone: k => { c.expression = k; } }),
   ]);
 
   // Outfits are a universal 4-level pool (data/outfits.yaml): gender -> genre ->
@@ -372,6 +389,7 @@ function charCard(c, i) {
       branchOnly: lvl < 3,
       keys: lvl === 3 ? () => Object.keys(leafMap()) : branchKeys,
       getValue: lvl === 3 ? (k => leafMap()[k] || '') : undefined,
+      current: lvl === 3 ? (() => o.key) : undefined,   // branches start on "＋ new…"
       onDone: k => { [() => o.gender = k, () => o.genre = k, () => o.subgenre = k, () => o.key = k][lvl](); },
     });
 
@@ -393,7 +411,8 @@ function charCard(c, i) {
       outfitAdd,
       el('label', {}, 'Clothing colour'),
       el('div', { class: 'grid3' }, ['base', 'contrast', 'detail'].map(colorCell)),
-      addEntryRow({ target: 'colors', keys: () => PRESETS.colors, getValue: k => k, nameIsValue: true }),
+      addEntryRow({ target: 'colors', keys: () => PRESETS.colors, getValue: k => k, nameIsValue: true,
+        current: () => (PRESETS.colors || []).includes(c.colors.base) ? c.colors.base : '' }),
     ];
   };
 

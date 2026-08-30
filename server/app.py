@@ -225,7 +225,7 @@ def entry_op():
         if action == "get":
             tgt = b["target"]
             v = data.get_entry(tgt, b["key"])[0] if tgt in data.CATEGORIES else ""
-            return jsonify({"value": v})
+            return jsonify({"value": v.strip()})
         tgt, path, key = b["target"], b.get("path") or [], b["key"]
         if action == "update":
             saved = data.update_entry(tgt, path, key,
