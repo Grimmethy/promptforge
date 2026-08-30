@@ -31,11 +31,26 @@ FLAT_MOVES = {
 }
 
 # expressions: the base `aroused` stays (tame); the overlay carries an explicit
-# override that wins only while NSFW is on.
-EXPR_OVERLAY = {
-    "aroused": ("blush, half-closed eyes, parted lips, panting, asshole, pussy, "
-                "REDACTED"),
-}
+# override that wins only while NSFW is on. The explicit value is NOT hard-coded
+# here (this file is tracked / public) — it is recovered from the agent-manager
+# auto-stash, or left for the user to type into data/nsfw/expressions.yaml.
+EXPR_OVERLAY_KEYS = ["aroused"]
+
+
+def _explicit_from_stash(key):
+    """Best-effort: pull `<key>: <value>` for an expression out of any git stash."""
+    try:
+        stashes = subprocess.run(["git", "stash", "list"], cwd=ROOT,
+                                 capture_output=True, text=True).stdout
+    except OSError:
+        return None
+    for i in range(stashes.count("\n") + 1):
+        diff = subprocess.run(["git", "stash", "show", "-p", f"stash@{{{i}}}"],
+                              cwd=ROOT, capture_output=True, text=True).stdout
+        for line in diff.splitlines():
+            if line.startswith("+") and line[1:].strip().startswith(key + ":"):
+                return line[1:].strip().split(":", 1)[1].strip()
+    return None
 
 # outfits: (parent-key path, key) subtrees to relocate
 OUTFIT_MOVES = [
@@ -100,12 +115,17 @@ def move_flat():
 def expr_overlay():
     over = os.path.join(NSFW, "expressions.yaml")
     data._ensure_overlay(over, "expressions")
-    for k, v in EXPR_OVERLAY.items():
+    for k in EXPR_OVERLAY_KEYS:
         if _has(over, ["entries"], k):
-            yaml_insert.update_entry(over, ["entries"], k, v)
-        else:
-            yaml_insert.insert_entry(over, ["entries"], k, v)
-        print(f"  ~ nsfw/expressions.yaml :: {k} (explicit override)")
+            print(f"  = nsfw/expressions.yaml :: {k} already set, leaving as-is")
+            continue
+        v = _explicit_from_stash(k)
+        if not v:
+            print(f"  ! nsfw/expressions.yaml :: {k} — no stashed value found; "
+                  f"add it by hand to data/nsfw/expressions.yaml")
+            continue
+        yaml_insert.insert_entry(over, ["entries"], k, v)
+        print(f"  ~ nsfw/expressions.yaml :: {k} (explicit override, from stash)")
 
 
 def move_outfits():
