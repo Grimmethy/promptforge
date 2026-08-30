@@ -4,3 +4,5 @@ __pycache__/
 gallery/*
 !gallery/.gitkeep
 .env
+# explicit-content overlay merged in only while the NSFW toggle is on
+data/nsfw/

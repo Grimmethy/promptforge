@@ -99,6 +99,7 @@ def presets():
                    "tags": doc.get("tags", "")})
 
     return jsonify({
+        "nsfw": data.nsfw_enabled(),
         "characters": {"preset": preset_chars, "secondbrain": sb_chars},
         "styles": data.list_entries("styles"),
         "backgrounds": data.list_entries("backgrounds"),
@@ -119,6 +120,16 @@ def presets():
         "checkpoints": list_checkpoints(),
         "secondbrain_dir": secondbrain.SB_DIR or None,
     })
+
+
+@app.route("/api/nsfw", methods=["GET", "POST"])
+def nsfw_toggle():
+    """Process-global NSFW toggle. GET reads it; POST {enabled: bool} sets it.
+    While on, data.py merges the gitignored data/nsfw/ overlay into every read."""
+    if request.method == "POST":
+        b = request.get_json(force=True, silent=True) or {}
+        data.set_nsfw(bool(b.get("enabled")))
+    return jsonify({"enabled": data.nsfw_enabled()})
 
 
 @app.route("/api/character/<source>/<path:name>")

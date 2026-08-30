@@ -19,11 +19,57 @@ RAND_DIR = os.path.join(DATA_DIR, "randomizer")
 CN_DIR = os.path.join(DATA_DIR, "cn_positions")
 CN_KP_DIR = os.path.join(CN_DIR, "keypoints")
 
+# Gitignored overlay of explicit content. Mirrors DATA_DIR: flat pools as
+# `entries:` maps, outfits as the nested tree, themes as `themes:`, plus a
+# cn_positions/ (+ keypoints/) sub-tree. Merged into every read only while the
+# NSFW toggle is on (presence of NSFW_DIR/enabled). Absent on a fresh clone of
+# the public repo -> every overlay read is a harmless no-op.
+NSFW_DIR = os.path.join(DATA_DIR, "nsfw")
+NSFW_CN_DIR = os.path.join(NSFW_DIR, "cn_positions")
+NSFW_CN_KP_DIR = os.path.join(NSFW_CN_DIR, "keypoints")
+_NSFW_FLAG = os.path.join(NSFW_DIR, "enabled")
+
 CATEGORIES = ("poses", "positions", "styles", "backgrounds", "supporting",
               "expressions", "colors")
 
 # Targets the UI's inline "add entry" boxes may write to (see add_entry).
 ALLOWED_ENTRY_TARGETS = frozenset(CATEGORIES) | {"outfits", "themes"}
+
+
+# ------------------------------------------------------------------- NSFW toggle
+
+def nsfw_enabled():
+    """True while the NSFW overlay should be merged into every data read."""
+    return os.path.isfile(_NSFW_FLAG)
+
+
+def set_nsfw(on):
+    """Flip the process-global NSFW toggle (a gitignored marker file)."""
+    if on:
+        os.makedirs(NSFW_DIR, exist_ok=True)
+        with open(_NSFW_FLAG, "w", encoding="utf-8") as fh:
+            fh.write("")
+    elif os.path.isfile(_NSFW_FLAG):
+        os.remove(_NSFW_FLAG)
+    return nsfw_enabled()
+
+
+def _load_overlay(rel):
+    """Parsed `data/nsfw/<rel>` (dict) or {} when NSFW is off / the file is absent."""
+    if not nsfw_enabled():
+        return {}
+    return _load_yaml(os.path.join(NSFW_DIR, rel))
+
+
+def _deep_merge(base, over):
+    """Recursively merge `over` onto `base` (dicts merge, other values replace).
+    Neither input is mutated."""
+    if not isinstance(base, dict) or not isinstance(over, dict):
+        return over if over is not None else base
+    out = dict(base)
+    for k, v in over.items():
+        out[k] = _deep_merge(out[k], v) if k in out else v
+    return out
 
 
 # --------------------------------------------------------------------------- io
@@ -160,8 +206,21 @@ def _cat_path(category):
     return os.path.join(DATA_DIR, category + ".yaml")
 
 
+def _cat_entries(category):
+    """Base `entries:` map, with the NSFW overlay merged on top when enabled
+    (base key order preserved, overlay keys appended / overriding)."""
+    base = _load_yaml(_cat_path(category)).get("entries") or {}
+    over = _load_overlay(category + ".yaml").get("entries") or {}
+    if not over:
+        return base
+    merged = dict(base)
+    for k, v in over.items():
+        merged[k] = v
+    return merged
+
+
 def list_entries(category):
-    entries = _load_yaml(_cat_path(category)).get("entries") or {}
+    entries = _cat_entries(category)
     keys = list(entries.keys())
     if "none" in keys:
         keys.remove("none")
@@ -171,7 +230,7 @@ def list_entries(category):
 
 def get_entry(category, key):
     """Return (positive, negative) for a category entry."""
-    entries = _load_yaml(_cat_path(category)).get("entries") or {}
+    entries = _cat_entries(category)
     val = entries.get(key, "")
     if isinstance(val, dict):
         return str(val.get("pos", "")), str(val.get("neg", ""))
@@ -187,8 +246,11 @@ _OUTFIT_PLACEHOLDER = re.compile(r"\{(base|contrast|detail)\}")
 
 
 def load_outfit_tree():
-    """Raw nested outfit dict. Reloaded per request like the rest of the module."""
-    return _load_yaml(os.path.join(DATA_DIR, "outfits.yaml"))
+    """Raw nested outfit dict. Reloaded per request like the rest of the module.
+    The NSFW overlay (data/nsfw/outfits.yaml) is deep-merged in when enabled."""
+    base = _load_yaml(os.path.join(DATA_DIR, "outfits.yaml"))
+    over = _load_overlay("outfits.yaml")
+    return _deep_merge(base, over) if over else base
 
 
 def outfit_fragment(sel):
@@ -225,7 +287,34 @@ def fill_outfit(template, colors):
 
 # ---------------------------------------------- add / update / delete entry (UI)
 
-def _entry_target(target, path, value=None, fields=None, *, kind="add"):
+def _overlay_root_line(target):
+    """Seed text for a freshly created data/nsfw/<target>.yaml."""
+    if target in CATEGORIES:
+        return "entries:\n"
+    if target == "themes":
+        return "themes:\n"
+    return ""   # outfits: nested tree starts at the document root
+
+
+def _ensure_overlay(file_path, target):
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    if not os.path.isfile(file_path):
+        with open(file_path, "w", encoding="utf-8") as fh:
+            fh.write(_overlay_root_line(target))
+
+
+def _key_in_file(file_path, parent_path, key):
+    if not os.path.isfile(file_path):
+        return False
+    node = _load_yaml(file_path)
+    for seg in list(parent_path) + [key]:
+        if not isinstance(node, dict) or seg not in node:
+            return False
+        node = node[seg]
+    return True
+
+
+def _entry_target(target, path, value=None, fields=None, *, kind="add", key=None):
     """Resolve a UI entry write to (file_path, parent_path, node).
 
     target: one of ALLOWED_ENTRY_TARGETS.
@@ -234,12 +323,21 @@ def _entry_target(target, path, value=None, fields=None, *, kind="add"):
         3, empty branch `key: {}` shallower); update: leaf only (3 deep); delete: any.
       - "themes"  -> `themes: {key: {style,setting_bias,palette,lighting,negative_add}}`.
     `node` is unused for kind='delete'. Raises ValueError on bad input.
+
+    The write lands in the gitignored NSFW overlay (data/nsfw/<target>.yaml) when:
+      - kind='add' and the NSFW toggle is on (new explicit content stays out of the
+        public repo), or
+      - kind in ('update','delete') and the key currently lives in the overlay.
+    Otherwise it lands in the tracked base file, exactly as before.
     """
     target = str(target or "").strip()
     if target not in ALLOWED_ENTRY_TARGETS:
         raise ValueError(f"unknown target '{target}'")
-    file_path = os.path.abspath(os.path.join(DATA_DIR, target + ".yaml"))
-    if os.path.commonpath([file_path, os.path.abspath(DATA_DIR)]) != os.path.abspath(DATA_DIR):
+    base_fp = os.path.abspath(os.path.join(DATA_DIR, target + ".yaml"))
+    over_fp = os.path.abspath(os.path.join(NSFW_DIR, target + ".yaml"))
+    root = os.path.abspath(DATA_DIR)
+    if (os.path.commonpath([base_fp, root]) != root
+            or os.path.commonpath([over_fp, root]) != root):
         raise ValueError("path escapes data dir")
     path = [str(p).strip() for p in (path or [])]
 
@@ -256,27 +354,36 @@ def _entry_target(target, path, value=None, fields=None, *, kind="add"):
         from . import themes
         parent_path = ["themes"]
         node = {k: str((fields or {}).get(k, "")).strip() for k in themes._KEYS}
+
+    if kind == "add":
+        if nsfw_enabled():
+            _ensure_overlay(over_fp, target)
+            file_path = over_fp
+        else:
+            file_path = base_fp
+    else:  # update / delete: follow the key to whichever file holds it
+        file_path = over_fp if _key_in_file(over_fp, parent_path, key) else base_fp
     return file_path, parent_path, node
 
 
 def add_entry(target, path, key, value=None, fields=None):
     """Append a new entry to a data YAML from the UI, preserving comments."""
     from . import yaml_insert
-    fp, parent, node = _entry_target(target, path, value, fields, kind="add")
+    fp, parent, node = _entry_target(target, path, value, fields, kind="add", key=key)
     return yaml_insert.insert_entry(fp, parent, key, node)
 
 
 def update_entry(target, path, key, value=None, fields=None):
     """Replace an existing entry's value in place, preserving comments."""
     from . import yaml_insert
-    fp, parent, node = _entry_target(target, path, value, fields, kind="update")
+    fp, parent, node = _entry_target(target, path, value, fields, kind="update", key=key)
     return yaml_insert.update_entry(fp, parent, key, node)
 
 
 def delete_entry(target, path, key):
     """Remove an entry (and its subtree) from a data YAML, preserving comments."""
     from . import yaml_insert
-    fp, parent, _ = _entry_target(target, path, kind="delete")
+    fp, parent, _ = _entry_target(target, path, kind="delete", key=key)
     return yaml_insert.delete_entry(fp, parent, key)
 
 
@@ -296,24 +403,40 @@ def load_view_tags():
     return _load_yaml(os.path.join(CN_DIR, "_view_tags.yaml")) or {}
 
 
+def _cn_dirs():
+    """Pose library dirs. NSFW overlay first so an overlay copy shadows a
+    same-named tracked pose (e.g. a dashboard-saved explicit variant)."""
+    return [NSFW_CN_DIR, CN_DIR] if nsfw_enabled() else [CN_DIR]
+
+
 def list_cn_positions():
-    try:
-        names = [
-            os.path.splitext(f)[0]
-            for f in os.listdir(CN_DIR)
-            if f.endswith((".yaml", ".yml")) and not f.startswith("_")
-        ]
-    except OSError:
-        names = []
+    names = set()
+    for d in _cn_dirs():
+        try:
+            for f in os.listdir(d):
+                if f.endswith((".yaml", ".yml")) and not f.startswith("_"):
+                    names.add(os.path.splitext(f)[0])
+        except OSError:
+            pass
     return sorted(names)
 
 
 def _cn_path(name):
-    for ext in (".yaml", ".yml"):
-        p = os.path.join(CN_DIR, name + ext)
+    for d in _cn_dirs():
+        for ext in (".yaml", ".yml"):
+            p = os.path.join(d, name + ext)
+            if os.path.isfile(p):
+                return p
+    return os.path.join(CN_DIR, name + ".yaml")
+
+
+def _cn_kp_path(fname):
+    """Resolve a skeleton keypoints file, NSFW overlay first (matches _cn_dirs)."""
+    for d in ([NSFW_CN_KP_DIR, CN_KP_DIR] if nsfw_enabled() else [CN_KP_DIR]):
+        p = os.path.join(d, fname)
         if os.path.isfile(p):
             return p
-    return os.path.join(CN_DIR, name + ".yaml")
+    return os.path.join(CN_KP_DIR, fname)
 
 
 def get_cn_position(name):
@@ -352,7 +475,7 @@ def cn_view_skeleton(name, view=None):
         entry = {"file": entry, "tags": ""}
     entry = entry or {}
     fname = entry.get("file")
-    path = os.path.join(CN_KP_DIR, fname) if fname else None
+    path = _cn_kp_path(fname) if fname else None
     if path and not os.path.isfile(path):
         path = None
     return path, str(entry.get("tags", ""))
@@ -365,7 +488,7 @@ def cn_canonical_skeleton(name):
     pos = get_cn_position(name)
     fname = pos.get("skeleton")
     if fname:
-        path = os.path.join(CN_KP_DIR, fname)
+        path = _cn_kp_path(fname)
         if os.path.isfile(path):
             return path, str(pos.get("tags", ""))
     path, _ = cn_view_skeleton(name)
@@ -425,10 +548,14 @@ def save_cn_pose(position, rig=None, rigs=None, position_tags="", people=1,
     pos = re.sub(r"[^A-Za-z0-9_-]", "_", str(position).strip()).strip("_")
     if not pos:
         raise ValueError("position must be non-empty")
-    os.makedirs(CN_KP_DIR, exist_ok=True)
+    # NSFW-on -> the pose (and its keypoints) land in the gitignored overlay so
+    # explicit poses saved from the dashboard never enter the public repo.
+    cn_dir = NSFW_CN_DIR if nsfw_enabled() else CN_DIR
+    kp_dir = NSFW_CN_KP_DIR if nsfw_enabled() else CN_KP_DIR
+    os.makedirs(kp_dir, exist_ok=True)
 
-    kp_path = os.path.abspath(os.path.join(CN_KP_DIR, f"{pos}.json"))
-    if os.path.commonpath([kp_path, os.path.abspath(CN_KP_DIR)]) != os.path.abspath(CN_KP_DIR):
+    kp_path = os.path.abspath(os.path.join(kp_dir, f"{pos}.json"))
+    if os.path.commonpath([kp_path, os.path.abspath(kp_dir)]) != os.path.abspath(kp_dir):
         raise ValueError("path escapes keypoints dir")
     if os.path.exists(kp_path) and not overwrite:
         raise ValueError(f"{pos}.json exists; pass overwrite=true")
@@ -443,6 +570,8 @@ def save_cn_pose(position, rig=None, rigs=None, position_tags="", people=1,
         json.dump(doc, fh)
 
     yaml_path = _cn_path(pos)
+    if not os.path.isfile(yaml_path):
+        yaml_path = os.path.join(cn_dir, f"{pos}.yaml")
     if update_yaml:
         doc = _load_yaml(yaml_path) if os.path.isfile(yaml_path) else {}
         doc.setdefault("name", pos.replace("_", " ").title())

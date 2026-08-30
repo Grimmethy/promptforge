@@ -48,9 +48,11 @@ async function boot() {
   $('#reroll').onclick = () => { $('#seed').value = -1; generate(); };
   $$('#inputs select, #inputs input, #inputs textarea').forEach(n => n.addEventListener('change', () => { persist(); schedulePreview(); }));
   $('#theme').addEventListener('change', applyThemeHints);
+  $('#nsfw').addEventListener('change', onNsfwToggle);
   installAddBoxes();   // after the blanket change-listener so add-box inputs are excluded
 
   restore();
+  $('#nsfw').checked = !!PRESETS.nsfw;   // server flag is the source of truth, not localStorage
   renderChars();
   await comfyStatus();
   await loadGallery();
@@ -74,9 +76,24 @@ async function reloadPresets() {
   fillSelect('#theme', PRESETS.themes.map(t => t.name));
   fillSelect('#setting', ['none', ...PRESETS.backgrounds.filter(x => x !== 'none')]);
   fillSelect('#style', ['none', ...PRESETS.styles.filter(x => x !== 'none')]);
+  if ($('#nsfw')) $('#nsfw').checked = !!PRESETS.nsfw;
   refreshPoseLib();
   renderChars();
   schedulePreview();
+}
+
+// NSFW toggle: flip the process-global server flag, then re-pull /api/presets so
+// every dropdown + character card + inline edit-box list gains / loses the
+// explicit entries at once. The prompt preview is server-rendered so it follows.
+async function onNsfwToggle(e) {
+  const enabled = e.target.checked;
+  const r = await fetch('/api/nsfw', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  }).then(r => r.json()).catch(() => ({ enabled: !enabled }));
+  $('#nsfw').checked = !!r.enabled;
+  toast('NSFW content ' + (r.enabled ? 'shown' : 'hidden'));
+  await reloadPresets();
 }
 
 
@@ -791,7 +808,9 @@ function persist() {
 }
 function formValues() {
   const o = {};
-  $$('#inputs select, #inputs input, #inputs textarea').forEach(n => { if (n.id) o[n.id] = n.type === 'checkbox' ? n.checked : n.value; });
+  $$('#inputs select, #inputs input, #inputs textarea').forEach(n => {
+    if (n.id && n.id !== 'nsfw') o[n.id] = n.type === 'checkbox' ? n.checked : n.value;   // #nsfw lives on the server
+  });
   return o;
 }
 function restore() {

@@ -13,13 +13,6 @@
 # to pre-seed the cascade when that character is picked.
 
 female:
-  bare:
-    nude:
-      full: REDACTED
-      topless: REDACTED
-    underwear:
-      basic: "{base} bra, {contrast} panties"
-      lingerie: "REDACTED"
   casual:
     everyday:
       sundress: "{base} sundress, thin straps, {detail} floral print, sandals"
@@ -52,19 +45,8 @@ female:
       cocktail dress: "{base} cocktail dress, clutch, strappy heels"
     suit:
       pantsuit: "{base} tailored pantsuit, {contrast} blouse, oxfords"
-  bdsm:
-    harness:
-      leather harness: "REDACTED"
-      rope harness: "REDACTED"
-    fetish:
-      latex suit: "REDACTED"
-      corset set: "REDACTED"
 
 male:
-  bare:
-    nude:
-      full: REDACTED
-      shirtless: "shirtless, bare chest, {contrast} trousers"
   casual:
     everyday:
       open shirt: "{base} open shirt, rolled sleeves, {contrast} dark trousers, leather belt"
@@ -80,15 +62,8 @@ male:
     adventurer:
       leather jerkin: "{base} leather jerkin, tunic, bracers, worn boots"
       chainmail: "chainmail shirt, {base} tabard, gauntlets"
-    bdsm:
-      harness: "REDACTED"
 
 androgynous:
-  bare:
-    nude:
-      full: REDACTED
-    underwear:
-      basic: "{base} briefs, {contrast} tank top"
   casual:
     everyday:
       jumpsuit: "{base} utilitarian jumpsuit, {contrast} webbing belt, boots"

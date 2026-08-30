@@ -5,23 +5,6 @@ entries:
   solo full body: solo, full body, full shot
   two characters side by side: 2girls, side by side, full body, symmetrical
   embrace: 2girls, hug, embrace, close, face to face
-  from behind hold: hetero, from behind, hands on hips, held in place
-  doggystyle:
-    pos: >
-      REDACTED,
-      motion lines
-    neg: ""
-  missionary:
-    pos: REDACTED
-    neg: ""
-  cowgirl:
-    pos: REDACTED
-    neg: ""
-  restrained by partner:
-    pos: >
-      hetero, from behind, wrists held behind back, pinned, hand in hair,
-      bent forward
-    neg: ""
   pov: pov, first person view, looking at viewer, reaching toward viewer
   low angle hero shot: from below, low angle, looking down at viewer, dramatic
   high angle: from above, high angle, looking up at viewer

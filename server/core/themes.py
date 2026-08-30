@@ -11,7 +11,13 @@ _KEYS = ("style", "setting_bias", "palette", "lighting", "negative_add")
 
 
 def _all():
-    return data._load_yaml(_PATH).get("themes") or {}
+    base = data._load_yaml(_PATH).get("themes") or {}
+    over = data._load_overlay("themes.yaml").get("themes") or {}
+    if not over:
+        return base
+    merged = dict(base)
+    merged.update(over)
+    return merged
 
 
 def list_themes():
