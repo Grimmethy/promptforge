@@ -91,3 +91,26 @@ Replace the bare `except Exception:` with `except Exception as exc:` and, before
 
 Benefits:
 Operators can now distinguish "Ollama process is not listening" from "Ollama is alive but returned a truncated JSON body" from "the OLLAMA_URL environment variable is set to a non-URL string" by reading a single log line, cutting mean-time-to-diagnose from an unbounded grep-and-guess session to a targeted log search. The change is a one-line addition inside the existing `except` clause, introduces no new code paths, and preserves the existing caller contract, so regression risk is negligible.
+
+### AC-5 · Surface preview-render failures instead of swallowing them silently
+Strength: Strong
+Files: web/app.js
+Snippet:
+```
+    $('#preview').textContent = pose + (p.positive
+      ? `POSITIVE\n${p.positive}\n\nNEGATIVE\n${p.negative}`
+      : `A (${r.n_chars} chars)\n${p.region_a}\n\nB\n${p.region_b}\n\nBASE\n${p.base}\n\nNEGATIVE\n${p.negative}`);
+  } catch { }
+}
+
+function applyThemeHints() {
+```
+
+Problem:
+The prompt-preview render step wraps its entire formatting-and-write path in a bare `catch {}` that discards the error object, the stack, and any context about which input shape triggered the failure. Because the rendered preview is the sole feedback channel the user sees while iterating on a prompt, a null `#preview` (panel not yet mounted), an unresolved async payload leaving `r` or `p` undefined, or a pathological `pose.toString` all collapse into a blank panel with zero diagnostic signal. The developer sees nothing in the console, the user sees an empty box, and the root cause is indistinguishable from "the feature simply hasn't loaded yet."
+
+Solution:
+Replace the empty `catch {}` with a handler that (1) logs a structured warning via `console.warn('[promptforge:preview] render failed', err)` so the error object, message, and stack are preserved in the browser console, (2) writes a short human-readable fallback into `#preview` (e.g. "Preview unavailable — see console for details") so the user knows the panel rendered *and* failed rather than simply being empty, and (3) re-throws the error only if the caller is expected to handle it (i.e. do not swallow it when the render is invoked from an event handler that has its own error boundary). No new dependency or global state is introduced; the change is confined to the existing `try/catch` block.
+
+Benefits:
+Developers can immediately see *which* input shape broke the formatter and *where* it threw, turning a silent blank-panel bug into a one-line console hit. Users get a visible "something went wrong" cue instead of mistaking a failure for an empty result, which eliminates the most common support ticket ("the preview just shows nothing"). Because the fix is scoped to the single `catch` block, it carries no regression risk to the happy-path rendering logic and can be verified with a unit test that stubs `$('#preview')` to `null` and asserts the warning is emitted.
