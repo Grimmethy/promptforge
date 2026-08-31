@@ -68,3 +68,26 @@ Replace the catch-all silent return with a `logger.warning` (or `logger.error` f
 
 Benefits:
 Operators gain immediate visibility in structured logs and metrics whenever the probe degrades, can distinguish "genuinely empty result" from "probe is broken" without code inspection, and can correlate a spike in `probe_failure_total` with the exact exception and command that caused it — turning a silent, days-long debugging exercise into a one-line log search.
+
+### AC-4 · Log the swallowed exception in Ollama /api/ps poll
+Strength: Strong
+Files: server/core/comfy_proc.py
+Snippet:
+```
+    try:
+        with urllib.request.urlopen(f"{OLLAMA_URL}/api/ps", timeout=5) as r:
+            body = json.load(r)
+    except Exception:
+        return []
+    models = body.get("models") if isinstance(body, dict) else None
+    if not isinstance(models, list):
+```
+
+Problem:
+The `try/except Exception: return []` block around the `urllib.request.urlopen(f"{OLLAMA_URL}/api/ps", timeout=5)` call silently discards every distinct failure mode—`ConnectionRefusedError` (Ollama not running), `socket.timeout` (Ollama hung), `json.JSONDecodeError` (malformed or partial body), and `TypeError` (misconfigured `OLLAMA_URL`)—into an identical empty list. Because this lives in `server/core/`, it is almost certainly invoked from a request handler or a periodic status poll, so no user-facing traceback will surface the cause. An on-call engineer seeing "no models loaded" has zero log trail to tell whether the backend is down, returning garbage, or the URL constant is simply wrong.
+
+Solution:
+Replace the bare `except Exception:` with `except Exception as exc:` and, before the `return []`, emit a single structured log line at WARNING level that includes the exception type, its message, the target URL, and the timeout value, e.g. `logger.warning("Ollama /api/ps poll failed: %s: %s (url=%s, timeout=%ss)", type(exc).__name__, exc, OLLAMA_URL, 5)`. Keep the graceful-degradation contract intact—still return `[]` so callers are unaffected—but ensure the diagnostic signal is preserved in the application log (or structured-logging sink) for later correlation. No re-raise, no change to the return type, no new dependency.
+
+Benefits:
+Operators can now distinguish "Ollama process is not listening" from "Ollama is alive but returned a truncated JSON body" from "the OLLAMA_URL environment variable is set to a non-URL string" by reading a single log line, cutting mean-time-to-diagnose from an unbounded grep-and-guess session to a targeted log search. The change is a one-line addition inside the existing `except` clause, introduces no new code paths, and preserves the existing caller contract, so regression risk is negligible.
