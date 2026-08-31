@@ -285,10 +285,40 @@ async function comfyStatus() {
     $('#comfyDot').className = 'dot ' + (s.up ? 'up' : 'down');
     $('#comfyMsg').textContent = s.up
       ? `ComfyUI ok · ${(s.vram_free / 1e9).toFixed(1)}/${(s.vram_total / 1e9).toFixed(0)} GB free`
+      + (s.lease_held ? ' · holding GPU lease' : '')
       : 'ComfyUI unreachable';
     if (s.up && s.checkpoints?.length && $('#model').options.length && $('#model').value.startsWith('('))
       fillSelect('#model', s.checkpoints);
+    renderComfyBtn(s);
   } catch { $('#comfyMsg').textContent = '?'; }
+}
+
+function renderComfyBtn(s) {
+  let b = $('#comfyBtn');
+  if (!b) {
+    b = el('button', { id: 'comfyBtn', class: 'small', style: 'margin-left:8px' });
+    $('#comfyMsg').insertAdjacentElement('afterend', b);
+  }
+  if (s.autostarting) { b.textContent = 'starting…'; b.disabled = true; return; }
+  b.disabled = false;
+  if (!s.up) {
+    b.textContent = 'Start ComfyUI';
+    b.onclick = async () => {
+      b.disabled = true; b.textContent = 'starting…';
+      const r = await fetch('/api/comfy/start', { method: 'POST' }).then(r => r.json()).catch(() => ({}));
+      if (r.error) toast(r.error);
+      comfyStatus();
+    };
+  } else if (s.managed) {
+    b.textContent = 'Stop ComfyUI';
+    b.onclick = async () => {
+      b.disabled = true;
+      await fetch('/api/comfy/stop', { method: 'POST' }).catch(() => {});
+      comfyStatus();
+    };
+  } else {
+    b.remove();  // running but not ours -- nothing to offer
+  }
 }
 
 // ------------------------------------------------------------- characters
@@ -695,6 +725,10 @@ async function pollJob(jid, tile, meta) {
     const j = await fetch('/api/job/' + jid).then(r => r.json());
     const bar = tile.querySelector('.bar');
     if (j.status === 'running' && bar) bar.style.width = Math.min(90, 10 + i * 4) + '%';
+    if (j.status === 'starting-comfyui') {
+      tile.querySelector('.spin').textContent = j.comfy_step || 'starting ComfyUI…';
+      continue;
+    }
     if (j.status === 'error') { tile.querySelector('.spin').textContent = '⚠ ' + (j.error || 'error'); return; }
     if (j.status === 'done') {
       tile.replaceWith(...j.images.map(f => imgTile(f, { ...meta, seed: j.seed, spec: buildSpec(), prompt_used: j.prompt_used })));

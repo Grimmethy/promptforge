@@ -22,6 +22,28 @@ as the primary interface (the node graph stays as a debug mode).
 Env: `PROMPTFORGE_PORT` (7430), `COMFY_URL` (http://127.0.0.1:8188),
 `SECOND_BRAIN_DIR`, `PROMPTFORGE_DATA_DIR`.
 
+### ComfyUI auto-start (GPU-coordinated)
+
+If ComfyUI is down when a generation starts, PromptForge brings it up itself. It
+first measures per-GPU free VRAM (`nvidia-smi`); if a GPU already has room it just
+starts ComfyUI there and the agent-manager pipeline is never touched. Only when
+ComfyUI genuinely can't fit does it take a shared lease file, evict Ollama's
+resident model(s), and start ComfyUI — the pipeline then yields its local-model
+ticks until the lease clears (released ~60 s after the last job, or stomped by an
+explicit `bash scripts/launch.sh` on the agent-manager side).
+
+| Env | Default | Meaning |
+| --- | --- | --- |
+| `COMFY_AUTOSTART` | `true` | set falsey to disable; a generation with ComfyUI down then errors as before |
+| `COMFY_LAUNCH_CMD` | `bash /media/model-cache/github/TheAgent/app/tools/ComfyUI/launch-comfyui.sh` | detached launch command (the browserless inner script) |
+| `COMFY_LOG` | `~/.local/state/comfyui.log` | ComfyUI stdout/stderr is appended here; `/api/comfy/status` tails it |
+| `COMFY_PID_PATH` | `~/.local/state/promptforge/comfyui.pid` | pid of a ComfyUI PromptForge started (drives the Stop button) |
+| `COMFY_START_TIMEOUT_S` | `120` | how long to wait for `/system_stats` after spawn |
+| `COMFY_REQUIRED_VRAM_MB` | `9000` | VRAM ComfyUI needs to be considered "fits" |
+| `COMFY_CUDA_DEVICE` | `0` | ComfyUI's target GPU index; another GPU with room is preferred over evicting |
+| `OLLAMA_URL` | `http://127.0.0.1:11434` | queried for resident models (`/api/ps`) and eviction (`/api/generate` `keep_alive:0`) |
+| `COMFY_LEASE_PATH` | `~/.local/state/agent-manager/comfyui-lease.json` | shared lease file; must match agent-manager's `AGENT_MANAGER_COMFY_LEASE_PATH` |
+
 ## Layout
 
 ```

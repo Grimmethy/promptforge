@@ -22,11 +22,76 @@ import urllib.parse
 import urllib.request
 import uuid
 
+from . import comfy_proc
+
 COMFY_URL = os.environ.get("COMFY_URL", "http://127.0.0.1:8188").rstrip("/")
 CN_MODEL = os.environ.get("PROMPTFORGE_CN_MODEL", "controlnet-openpose-sdxl-1.0.safetensors")
 
 _JOBS = {}          # job_id -> dict
 _JOBS_LOCK = threading.Lock()
+
+# States that mean "this job still needs the GPU" -- the lease refresher keeps the
+# shared lease alive while any job is in one of these.
+_ACTIVE_STATES = {"starting", "starting-comfyui", "queued", "running"}
+# Set when an explicit pipeline start deleted the lease out from under an active
+# job; a subsequent ComfyUI call failure is then reported as a reclaim, not a raw
+# connection error.
+_lease_stomped = False
+_refresher_started = False
+_refresher_lock = threading.Lock()
+
+
+def _any_active_job():
+    with _JOBS_LOCK:
+        return any(r.get("status") in _ACTIVE_STATES for r in _JOBS.values())
+
+
+def _lease_refresher():
+    """Runs only after ensure_comfyui_ready actually took a lease. Refreshes it
+    every ~30s while a job is active, releases it after a grace period with none,
+    and notices if an explicit pipeline start stomped the file."""
+    global _lease_stomped
+    idle_since = None
+    try:
+        while True:
+            time.sleep(30)
+            if _any_active_job():
+                idle_since = None
+                if not comfy_proc.lease_refresh(_current_job_id()):
+                    # File vanished while a job is still running -> reclaimed.
+                    _lease_stomped = True
+                    return
+            else:
+                if idle_since is None:
+                    idle_since = time.time()
+                elif time.time() - idle_since >= 60:
+                    comfy_proc.lease_release()
+                    return
+    finally:
+        _reset_refresher_flag()
+
+
+def _current_job_id():
+    with _JOBS_LOCK:
+        for r in _JOBS.values():
+            if r.get("status") in _ACTIVE_STATES:
+                return r.get("id")
+    return None
+
+
+def _start_lease_refresher():
+    global _refresher_started
+    with _refresher_lock:
+        if _refresher_started:
+            return
+        _refresher_started = True
+    threading.Thread(target=_lease_refresher, daemon=True).start()
+
+
+def _reset_refresher_flag():
+    global _refresher_started
+    with _refresher_lock:
+        _refresher_started = False
 
 
 # --------------------------------------------------------------- comfy http
@@ -169,7 +234,23 @@ def _set(rec, **kw):
 
 
 def _run(job, rec, gallery_dir):
+    global _lease_stomped
     try:
+        if comfy_proc.COMFY_AUTOSTART and not comfy_proc.comfy_up():
+            _lease_stomped = False
+            _set(rec, status="starting-comfyui", comfy_step="checking GPU…")
+            try:
+                result = comfy_proc.ensure_comfyui_ready(
+                    set_step=lambda s: _set(rec, comfy_step=s),
+                    job_id=job["id"],
+                )
+            except comfy_proc.ComfyUnavailable as exc:
+                _set(rec, status="error", error=str(exc))
+                comfy_proc.lease_release()
+                return
+            if result.get("lease_taken"):
+                _start_lease_refresher()
+
         if job.get("skeleton_png"):
             name = upload_image(job["skeleton_png"], f"promptforge_pose_{job['id'][:8]}.png")
             job["skeleton_name"] = name
@@ -229,9 +310,24 @@ def _run(job, rec, gallery_dir):
     except urllib.error.HTTPError as exc:
         _set(rec, status="error", error=f"{exc.code}: {exc.read().decode()[:400]}")
     except Exception as exc:  # noqa: BLE001
-        _set(rec, status="error", error=str(exc))
+        if _lease_stomped:
+            _set(rec, status="error", error=(
+                "the agent-manager pipeline reclaimed the GPU -- stop it, or "
+                "retry once it settles"))
+        else:
+            _set(rec, status="error", error=str(exc))
+    finally:
+        # A job that finished before the refresher's next tick still needs the
+        # lease dropped promptly if nothing else is active.
+        if not _any_active_job() and comfy_proc.lease_held():
+            comfy_proc.lease_release()
 
 
 def get_job(jid):
     with _JOBS_LOCK:
         return dict(_JOBS.get(jid) or {})
+
+
+def any_job_starting_comfyui():
+    with _JOBS_LOCK:
+        return any(r.get("status") == "starting-comfyui" for r in _JOBS.values())

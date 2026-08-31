@@ -13,8 +13,8 @@ import urllib.request
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from core import (assemble, comfy, data, pose_ops, randomizer, rig, secondbrain,
-                  themes, thumbs)
+from core import (assemble, comfy, comfy_proc, data, pose_ops, randomizer, rig,
+                  secondbrain, themes, thumbs)
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +68,25 @@ def list_checkpoints():
         return []
 
 
+def _comfy_log_tail(n=40):
+    try:
+        with open(comfy_proc.COMFY_LOG, "rb") as f:
+            return b"".join(f.readlines()[-n:]).decode("utf-8", "replace")
+    except OSError:
+        return ""
+
+
+def _comfy_extra_status():
+    pid = comfy_proc.managed_pid()
+    return {
+        "managed": pid is not None,
+        "pid": pid,
+        "autostart": comfy_proc.COMFY_AUTOSTART,
+        "autostarting": comfy.any_job_starting_comfyui(),
+        "lease_held": comfy_proc.lease_held(),
+    }
+
+
 @app.route("/api/comfy/status")
 def comfy_status():
     try:
@@ -78,9 +97,33 @@ def comfy_status():
             "vram_free": dev.get("vram_free"),
             "vram_total": dev.get("vram_total"),
             "checkpoints": list_checkpoints(),
+            **_comfy_extra_status(),
         })
     except Exception as exc:  # noqa: BLE001
-        return jsonify({"up": False, "error": str(exc), "checkpoints": []})
+        return jsonify({
+            "up": False, "error": str(exc), "checkpoints": [],
+            "log_tail": _comfy_log_tail(),
+            **_comfy_extra_status(),
+        })
+
+
+@app.route("/api/comfy/start", methods=["POST"])
+def comfy_start():
+    try:
+        result = comfy_proc.ensure_comfyui_ready()
+        return jsonify({"started": bool(result.get("started")), "up": comfy_proc.comfy_up(),
+                        **_comfy_extra_status()})
+    except comfy_proc.ComfyUnavailable as exc:
+        return jsonify({"started": False, "up": False, "error": str(exc),
+                        "log_tail": _comfy_log_tail()}), 502
+
+
+@app.route("/api/comfy/stop", methods=["POST"])
+def comfy_stop():
+    stopped = comfy_proc.stop_comfyui()
+    comfy_proc.lease_release()
+    return jsonify({"stopped": bool(stopped), "up": comfy_proc.comfy_up(),
+                    **_comfy_extra_status()})
 
 
 # -------------------------------------------------------------------- presets
