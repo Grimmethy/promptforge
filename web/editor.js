@@ -177,7 +177,7 @@ class PoseEditor {
     while (this.rigs.length < n) this.rigs.push(defaultRig(0.22));
     this._snap(); this.draw(); this._emit();
   }
-  getRigs() { return this.rigs.map(r => JSON.parse(JSON.stringify(r))); }
+  getRigs() { return this.rigs.map(r => structuredClone(r)); }
 
   getFrame(w, h) {
     return {
