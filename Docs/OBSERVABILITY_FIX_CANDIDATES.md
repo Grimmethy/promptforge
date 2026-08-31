@@ -45,3 +45,26 @@ Replace the bare `pass` with a `logger.warning` call that captures the exception
 
 Benefits:
 Operators and on-call engineers gain an immediate, greppable signal in the server log whenever a job's images or sidecar metadata fail to persist, turning an invisible data-loss event into a diagnosable one. The log line carries enough context (job id, target path, exception detail) to triage without attaching a debugger to a production process, and the WARNING level ensures it is visible under the default logging configuration rather than hidden behind a DEBUG flag.
+
+### AC-3 · Subprocess probe swallows all exceptions and returns empty list with no diagnostic trail
+Strength: Strong
+Files: server/core/comfy_proc.py
+Snippet:
+```
+            ],
+            capture_output=True, text=True, timeout=5, check=True,
+        ).stdout
+    except Exception:
+        return []
+    rows = []
+    for line in out.strip().splitlines():
+```
+
+Problem:
+The probe function wraps its `subprocess.run(...)` call in a bare `except Exception` (or equivalent catch-all) and unconditionally returns `[]`. Whether the child binary is missing (`FileNotFoundError`), segfaults, times out (`TimeoutExpired`), exits non-zero (`CalledProcessError`), or emits unparseable output, the caller receives the same empty list it would get for a legitimate "no rows" result. No log line, no metric increment, no structured error field is emitted, so a silent degradation of this probe is invisible in production until someone notices downstream data is missing and has to add temporary `print` statements to discover the root cause.
+
+Solution:
+Replace the catch-all silent return with a `logger.warning` (or `logger.error` for `FileNotFoundError`/`OSError` that indicate the binary is absent) that records the exception class, its message, the command string, the configured timeout, and — when available — the child's return code and a truncated stderr snippet. After logging, still return `[]` to preserve the existing caller contract, but attach a module-level counter (e.g. `probe_failure_total` via `prometheus_client` or the project's existing metrics helper) so the degradation is visible on dashboards. Do not rethrow; the "best-effort" semantics are intentional, but the failure must leave a trace.
+
+Benefits:
+Operators gain immediate visibility in structured logs and metrics whenever the probe degrades, can distinguish "genuinely empty result" from "probe is broken" without code inspection, and can correlate a spike in `probe_failure_total` with the exact exception and command that caused it — turning a silent, days-long debugging exercise into a one-line log search.
