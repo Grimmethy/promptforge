@@ -21,6 +21,7 @@ spawn failure degrades to "just try to start ComfyUI, no lease".
 """
 
 import json
+import logging
 import os
 import shlex
 import signal
@@ -29,6 +30,8 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 COMFY_URL = os.environ.get("COMFY_URL", "http://127.0.0.1:8188").rstrip("/")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
@@ -120,7 +123,11 @@ def ollama_models_on_gpu():
     try:
         with urllib.request.urlopen(f"{OLLAMA_URL}/api/ps", timeout=5) as r:
             body = json.load(r)
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "Ollama /api/ps poll failed: %s: %s (url=%s, timeout=5)",
+            type(exc).__name__, exc, OLLAMA_URL,
+        )
         return []
     models = body.get("models") if isinstance(body, dict) else None
     if not isinstance(models, list):
