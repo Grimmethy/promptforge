@@ -114,3 +114,26 @@ Replace the empty `catch {}` with a handler that (1) logs a structured warning v
 
 Benefits:
 Developers can immediately see *which* input shape broke the formatter and *where* it threw, turning a silent blank-panel bug into a one-line console hit. Users get a visible "something went wrong" cue instead of mistaking a failure for an empty result, which eliminates the most common support ticket ("the preview just shows nothing"). Because the fix is scoped to the single `catch` block, it carries no regression risk to the happy-path rendering logic and can be verified with a unit test that stubs `$('#preview')` to `null` and asserts the warning is emitted.
+
+### AC-6 · Silent catch in best-effort state gatherer loses all diagnostic signal
+Strength: Strong
+Files: web/app.js
+Snippet:
+```
+      rigs: editor ? editor.getRigs() : null,
+      libFrame: lastLibFrame,
+    });
+  } catch { }
+}
+function formValues() {
+  const o = {};
+```
+
+Problem:
+The `catch` block around the state-gathering code (assembling `rigs` via `editor.getRigs()` and `libFrame`, then passing them to a downstream call) contains no statement at all. If `editor.getRigs()` throws an internal invariant error, or the downstream call rejects synchronously, the exception is swallowed with zero trace: no `console.warn`, no structured log, no counter. A developer diagnosing "why is the rigs panel blank?" or "why did the frame snapshot come back `null`?" has no signal in the browser console, DevTools network tab, or any other surface to distinguish "editor was legitimately absent" from "editor was present but `getRigs()` blew up." The guard `editor ? … : null` already covers the absent-editor path, so any throw reaching the `catch` is an unexpected runtime failure that is now permanently invisible.
+
+Solution:
+Inside the existing `catch (err)` block, add a single `console.warn('[state-gather] best-effort snapshot failed:', err)` (or the project's equivalent lightweight logging helper if one exists). Do not rethrow, do not add a telemetry beacon, and do not change the surrounding control flow — the page must still continue rendering. The log should include the error object so the stack trace is preserved in the console, and the prefix tag makes it greppable. This is the minimal change: one line in the catch body, no new imports, no new dependency.
+
+Benefits:
+Any future regression in `editor.getRigs()` or the downstream call becomes immediately visible in the browser console during local development and in any log-forwarding setup the team already has, turning an invisible silent failure into a one-line diagnostic. The cost is a single `console.warn` that fires only on the exceptional path, so the happy path is unchanged and there is no performance or noise impact. It also preserves the intended "best-effort, don't crash the UI" behavior while giving the next engineer a concrete starting point instead of a blank stare at a `null` value.
