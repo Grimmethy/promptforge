@@ -14,6 +14,12 @@
 // registers nothing and has no side effects, so it is harmless whether an entry
 // is enabled or not.
 //
+// As of 2026-09-23, this directory also owns its own agent-manager dashboard tab via
+// agent-manager's manifest-driven tab mechanism (docs/PLUGIN_API.md "Dashboard tab"
+// section there) -- see ui/promptforge-tab.js. registerPath still points here (this
+// file), since the tab config lives on the plugins.json entry, dirname(registerPath)
+// is how agent-manager finds this repo's ui/ directory.
+//
 // Roadmap for the related (also non-task-source) plugins:
 //   SecondBrain/Projects/promptforge-ecosystem.md
 
