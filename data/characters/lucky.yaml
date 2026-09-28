@@ -1,0 +1,18 @@
+# Lucky the Pocket Gnome (aka Lucky Ponducky) - clockwork sorcerer, unaware of his own
+# magic. Bald, round-faced, portly build (Elmer Fudd-ish silhouette, described visually
+# rather than by name-dropping the character). Fragrancemancy is a lore/personality trait,
+# not an image tag -- when it matters for a shot, add a cinnamon-cookie-scented sparkle/
+# illusion effect via the detail slot or a custom addition, not here.
+name: Lucky the Pocket Gnome
+weight: 1.0
+base: >
+  1boy, solo focus, gnome, small stature, bald, round face, big round nose, portly, stout,
+  victorian, industrial revolution fashion, tailcoat, cloak, top hat, magic top hat,
+  pocket watch chain, ornate cane, walking cane, sparkles, magic aura, clockwork gears
+
+# Formal male suit cascade already covers waistcoat/pocket watch/oxfords; base above
+# layers his signature top hat, cloak and cane on top of whatever suit variant is picked.
+default_outfit: [male, formal, suit, three piece]
+
+negative_add: >
+  full head of hair, long hair, young, tall, muscular, bare headed, no hat
