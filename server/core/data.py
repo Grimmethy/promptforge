@@ -11,6 +11,8 @@ import re
 
 import yaml
 
+from . import cf_characters
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _REPO = os.path.dirname(os.path.dirname(_HERE))
 DATA_DIR = os.environ.get("PROMPTFORGE_DATA_DIR") or os.path.join(_REPO, "data")
@@ -147,7 +149,14 @@ def apply_weight(text, weight):
 
 # ------------------------------------------------------------- characters
 
+_CF_OWNS = ("Characters are owned by CharacterForge: edit this character there "
+            "(the local YAML presets were folded into it). Set PROMPTFORGE_CHARACTER_SOURCE=local "
+            "to use the legacy local presets.")
+
+
 def list_characters():
+    if cf_characters.configured():
+        return cf_characters.list_characters()
     try:
         names = [
             os.path.splitext(f)[0]
@@ -168,11 +177,15 @@ def _char_path(name):
 
 
 def get_character(name):
+    if cf_characters.configured():
+        return cf_characters.get_character(name)
     return _load_yaml(_char_path(name))
 
 
 def raw_character(name):
     """Return the character YAML file's exact text (for the preset editor)."""
+    if cf_characters.configured():
+        raise ValueError(_CF_OWNS)
     safe = re.sub(r"[^A-Za-z0-9_-]", "_", os.path.splitext(str(name))[0]).strip("_")
     if not safe:
         raise ValueError("empty name")
@@ -185,6 +198,8 @@ def raw_character(name):
 
 def save_character(filename, spec_yaml):
     """Write a character YAML. Returns the path. Guards against path escape."""
+    if cf_characters.configured():
+        raise ValueError(_CF_OWNS)
     safe = re.sub(r"[^A-Za-z0-9_-]", "_", os.path.splitext(str(filename))[0]).strip("_")
     if not safe:
         raise ValueError("empty filename")

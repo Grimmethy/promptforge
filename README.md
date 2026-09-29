@@ -95,3 +95,18 @@ Story generation and video generation are **separate future plugins** — see
 
 Not built (deliberately — separate future plugins): story / shot sequencing,
 video. WebSocket generation progress is coarse (status polling) for now.
+
+## Characters come from CharacterForge
+
+CharacterForge (`../characterforge`, :7433) is the canonical character store and an earlier
+step in the design process; PromptForge only renders characters. When it is present,
+`server/core/cf_characters.py` reads its `characters/` and `samples/` directories (a character's
+`## Keywords` block is the prompt base; `weight`, `default_outfit`, `negative_add` come from its
+frontmatter) and `/api/presets` keeps its shape (`characters.preset`; `characters.secondbrain`
+is empty since vault notes are imported into CharacterForge instead). The old preset editor
+refuses with a pointer to CharacterForge. Characters without a keyword block are not listed.
+
+Config: `CHARACTERFORGE_ROOT` (default: a sibling `characterforge` checkout),
+`CHARACTERFORGE_DIR` (override the user-characters dir). `PROMPTFORGE_CHARACTER_SOURCE=local`
+restores the legacy local YAML presets + Second Brain reader. Tests:
+`python3 -m unittest discover -s test -p 'test_*.py'`.

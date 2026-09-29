@@ -13,7 +13,7 @@ import urllib.request
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from core import (assemble, comfy, comfy_proc, data, pose_ops, randomizer, rig,
+from core import (assemble, cf_characters, comfy, comfy_proc, data, pose_ops, randomizer, rig,
                   secondbrain, themes, thumbs)
 
 logger = logging.getLogger(__name__)
@@ -136,8 +136,11 @@ def presets():
             "source": "preset", "name": name,
             "default_outfit": data.get_character(name).get("default_outfit"),
         })
-    sb_chars = [{"source": "secondbrain", "name": n}
-                for n in secondbrain.list_characters()]
+    # With CharacterForge present it is the single character source (Second Brain notes and
+    # the local presets were imported into it), so the vault list would only duplicate them.
+    cf = cf_characters.configured()
+    sb_chars = [] if cf else [{"source": "secondbrain", "name": n}
+                              for n in secondbrain.list_characters()]
 
     cn = []
     for p in data.list_cn_positions():
@@ -148,6 +151,7 @@ def presets():
     return jsonify({
         "nsfw": data.nsfw_enabled(),
         "characters": {"preset": preset_chars, "secondbrain": sb_chars},
+        "character_source": "characterforge" if cf else "local",
         "styles": data.list_entries("styles"),
         "backgrounds": data.list_entries("backgrounds"),
         "positions": data.list_entries("positions"),
