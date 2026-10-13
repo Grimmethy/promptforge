@@ -62,6 +62,12 @@ COMFY_REQUIRED_VRAM_MB = int(os.environ.get("COMFY_REQUIRED_VRAM_MB", "9000"))
 _COMFY_CUDA_DEVICE_RAW = os.environ.get("COMFY_CUDA_DEVICE", "").strip()
 COMFY_CUDA_DEVICE = int(_COMFY_CUDA_DEVICE_RAW) if _COMFY_CUDA_DEVICE_RAW else 0
 
+# Host RAM guard for a generation: ComfyUI + the pipeline's model + VMs share one box.
+# With almost no RAM available the whole machine thrashes (a generation then crawls at
+# minutes per step and the dashboard goes unreachable), so refuse early instead. 0 disables.
+COMFY_MIN_AVAILABLE_RAM_MB = int(os.environ.get("COMFY_MIN_AVAILABLE_RAM_MB", "2048"))
+COMFY_RAM_WAIT_S = int(os.environ.get("COMFY_RAM_WAIT_S", "20"))
+
 # Below this an /api/ps entry is a rounding artefact / tiny embed model, not a
 # resident LLM -- matches gpu-guard.js OLLAMA_RESIDENT_MIN_MB.
 _OLLAMA_RESIDENT_MIN_MB = 1024
@@ -435,3 +441,111 @@ def ensure_comfyui_ready(set_step=None, job_id=None):
         if lease_taken:
             lease_release()
         raise ComfyUnavailable(f"failed to start ComfyUI: {exc}") from exc
+
+
+# ------------------------------------------------------------------- generation claim
+
+def mem_available_mb():
+    """Host MemAvailable in MB from /proc/meminfo, or None if unreadable."""
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) // 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def models_to_evict(inventory, ollama_models, device=COMFY_CUDA_DEVICE, need=COMFY_REQUIRED_VRAM_MB):
+    """Names of resident Ollama models to unload so a generation fits on `device`.
+
+    ComfyUI is already running and pinned to its device, so unlike
+    plan_comfyui_placement there is no other GPU to steer to. Pure function.
+    Nothing to evict when GPU visibility is missing, the device already has room,
+    or nothing is resident.
+    """
+    if not inventory:
+        return []
+    by_index = {g["index"]: g for g in inventory}
+    target = by_index.get(device, inventory[0])
+    if target["free_mb"] >= need:
+        return []
+    return [m["name"] for m in ollama_models if m.get("name")]
+
+
+def claim_gpu(job_id, set_step=None, inventory=None, ollama_models=None,
+              mem_mb=None, sleep=time.sleep, now=time.time):
+    """Give a generation the GPU: hold the shared lease for the job (the pipeline
+    yields its local-model ticks while it is held), evict the pipeline's resident
+    model when ComfyUI would not fit next to it, then check host RAM.
+
+    Runs for EVERY generation, including when ComfyUI was already up -- the lease
+    used to be taken only on a cold start, so a generation against a running
+    ComfyUI collided with the pipeline's model (2026-10-12: 3.3 GB left for
+    ComfyUI, a job that crawled for minutes and a global OOM kill).
+
+    The inputs are injectable for tests. Returns {lease_taken, evicted}; raises
+    ComfyUnavailable (after releasing the lease) if host RAM stays too low.
+    """
+    def step(msg):
+        if set_step:
+            try:
+                set_step(msg)
+            except Exception:
+                pass
+
+    if lease_held():
+        lease_taken = lease_refresh(job_id)
+    else:
+        lease_taken = lease_acquire(job_id)
+
+    evicted = []
+    try:
+        inv = gpu_inventory() if inventory is None else inventory
+        models = ollama_models_on_gpu() if ollama_models is None else ollama_models
+        names = models_to_evict(inv, models)
+        if names:
+            step("freeing GPU…")
+            evict_ollama_models(names)
+            evicted = list(names)
+            deadline = now() + 10
+            while now() < deadline:
+                cur = gpu_inventory() if inventory is None else inventory
+                by_index = {g["index"]: g for g in cur}
+                tgt = by_index.get(COMFY_CUDA_DEVICE, cur[0] if cur else None)
+                if tgt is None or tgt["free_mb"] >= COMFY_REQUIRED_VRAM_MB:
+                    break
+                sleep(1)
+
+        if COMFY_MIN_AVAILABLE_RAM_MB > 0:
+            deadline = now() + COMFY_RAM_WAIT_S
+            avail = mem_available_mb() if mem_mb is None else mem_mb
+            while avail is not None and avail < COMFY_MIN_AVAILABLE_RAM_MB and now() < deadline:
+                step(f"waiting for host RAM ({avail} MB free)…")
+                sleep(2)
+                avail = mem_available_mb() if mem_mb is None else mem_mb
+            if avail is not None and avail < COMFY_MIN_AVAILABLE_RAM_MB:
+                raise ComfyUnavailable(
+                    f"host memory is too low for a generation ({avail} MB available, "
+                    f"need {COMFY_MIN_AVAILABLE_RAM_MB} MB) -- the machine would thrash; "
+                    "free some RAM or set COMFY_MIN_AVAILABLE_RAM_MB=0"
+                )
+    except Exception:
+        if lease_taken:
+            lease_release()
+        raise
+    return {"lease_taken": lease_taken, "evicted": evicted}
+
+
+def ensure_gpu_for_generation(set_step=None, job_id=None):
+    """Bring ComfyUI up if needed, then claim the GPU for this job. Returns
+    {started, lease_taken, evicted}. With autostart off and ComfyUI down it does
+    nothing (the generation then errors on the first ComfyUI call, as before)."""
+    started = False
+    if not comfy_up():
+        if not COMFY_AUTOSTART:
+            return {"started": False, "lease_taken": False, "evicted": []}
+        started = ensure_comfyui_ready(set_step=set_step, job_id=job_id)["started"]
+    claim = claim_gpu(job_id, set_step=set_step)
+    return {"started": started, **claim}

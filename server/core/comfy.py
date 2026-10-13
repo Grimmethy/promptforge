@@ -236,20 +236,21 @@ def _set(rec, **kw):
 def _run(job, rec, gallery_dir):
     global _lease_stomped
     try:
-        if comfy_proc.COMFY_AUTOSTART and not comfy_proc.comfy_up():
-            _lease_stomped = False
-            _set(rec, status="starting-comfyui", comfy_step="checking GPU…")
-            try:
-                result = comfy_proc.ensure_comfyui_ready(
-                    set_step=lambda s: _set(rec, comfy_step=s),
-                    job_id=job["id"],
-                )
-            except comfy_proc.ComfyUnavailable as exc:
-                _set(rec, status="error", error=str(exc))
-                comfy_proc.lease_release()
-                return
-            if result.get("lease_taken"):
-                _start_lease_refresher()
+        # Every generation claims the GPU (lease + evict the pipeline's model + RAM check),
+        # whether or not ComfyUI had to be started: see comfy_proc.claim_gpu.
+        _lease_stomped = False
+        _set(rec, status="starting-comfyui", comfy_step="checking GPU…")
+        try:
+            result = comfy_proc.ensure_gpu_for_generation(
+                set_step=lambda s: _set(rec, comfy_step=s),
+                job_id=job["id"],
+            )
+        except comfy_proc.ComfyUnavailable as exc:
+            _set(rec, status="error", error=str(exc))
+            comfy_proc.lease_release()
+            return
+        if result.get("lease_taken"):
+            _start_lease_refresher()
 
         if job.get("skeleton_png"):
             name = upload_image(job["skeleton_png"], f"promptforge_pose_{job['id'][:8]}.png")
