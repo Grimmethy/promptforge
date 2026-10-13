@@ -135,9 +135,12 @@ def comfy_stop():
 def presets():
     preset_chars = []
     for name in data.list_characters():
+        doc = data.get_character(name)
         preset_chars.append({
             "source": "preset", "name": name,
-            "default_outfit": data.get_character(name).get("default_outfit"),
+            "default_outfit": doc.get("default_outfit"),
+            # CharacterForge condition ladder (id + label), in worst-last order; [] if none
+            "conditions": [{"id": r["id"], "name": r["name"]} for r in doc.get("conditions") or []],
         })
     # With CharacterForge present it is the single character source (Second Brain notes and
     # the local presets were imported into it), so the vault list would only duplicate them.

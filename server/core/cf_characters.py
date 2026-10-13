@@ -76,6 +76,17 @@ def _weight(v):
         return 1.0
 
 
+def _conditions(raw):
+    """The condition ladder CharacterForge carries on an archetype's variants: ordered rungs
+    {id, name, keywords, negative}, e.g. 'tired' -> 'dark circles, slumped'. Malformed rungs are dropped."""
+    out = []
+    for r in raw if isinstance(raw, list) else []:
+        if isinstance(r, dict) and str(r.get("id") or "").strip():
+            out.append({"id": str(r["id"]).strip().lower(), "name": str(r.get("name") or r["id"]),
+                        "keywords": str(r.get("keywords") or ""), "negative": str(r.get("negative") or "")})
+    return out
+
+
 def _load(path):
     try:
         with open(path, "r", encoding="utf-8") as fh:
@@ -84,9 +95,13 @@ def _load(path):
         return {}
     slug = os.path.splitext(os.path.basename(path))[0]
     outfit = meta.get("default_outfit")
-    return {"name": meta.get("name") or slug.replace("_", " "), "weight": _weight(meta.get("weight")),
+    out = {"name": meta.get("name") or slug.replace("_", " "), "weight": _weight(meta.get("weight")),
             "base": _keywords(body), "default_outfit": outfit if isinstance(outfit, list) and outfit else None,
             "negative_add": str(meta.get("negative_add") or ""), "_slug": slug}
+    ladder = _conditions(meta.get("conditions"))
+    if ladder:
+        out["conditions"] = ladder
+    return out
 
 
 def _index():

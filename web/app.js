@@ -351,7 +351,7 @@ const outfitFromPointer = d => (Array.isArray(d) && d.length === 4)
 const blankChar = () => ({
   source: 'preset', name: (PRESETS.characters.preset[0] || {}).name || '',
   outfit: outfitFromPointer((PRESETS.characters.preset[0] || {}).default_outfit),
-  colors: EMPTY_COLORS(), expression: 'flat', weight: 1, text: '',
+  colors: EMPTY_COLORS(), expression: 'flat', weight: 1, text: '', condition: '',
 });
 
 // Coerce a possibly-legacy char (string `outfit`, missing `colors`) to the
@@ -473,11 +473,21 @@ function charCard(c, i) {
         c.name = e.target.value;
         const p = PRESETS.characters.preset.find(x => x.name === c.name);
         c.outfit = outfitFromPointer(p && p.default_outfit);
+        c.condition = '';   // each character has its own ladder
         renderChars(); schedulePreview();
       },
     }, names.map(n => el('option', {}, n)));
     nameSel.value = c.name;
-    body.push(nameSel, ...dressControls(), exprRow(), presetEditor(c.name));
+    // Condition ladder from CharacterForge (e.g. fed -> tired -> bruised -> gaunt); only
+    // characters that define one get the dropdown. "(none)" renders the base look.
+    const ladder = (PRESETS.characters.preset.find(x => x.name === c.name) || {}).conditions || [];
+    if (!ladder.some(r => r.id === c.condition)) c.condition = '';
+    const condRow = ladder.length ? [el('label', {}, 'Condition'), (() => {
+      const s = el('select', { onchange: e => { c.condition = e.target.value; schedulePreview(); } },
+        [el('option', { value: '' }, '(none)'), ...ladder.map(r => el('option', { value: r.id }, r.name))]);
+      s.value = c.condition; return s;
+    })()] : [];
+    body.push(nameSel, ...condRow, ...dressControls(), exprRow(), presetEditor(c.name));
   } else if (c.source === 'secondbrain') {
     const names = PRESETS.characters.secondbrain.map(p => p.name);
     if (!names.length) body.push(el('div', { class: 'muted' }, 'No SECOND_BRAIN_DIR/Characters/*.md found.'));
@@ -638,7 +648,7 @@ function buildSpec() {
   const chars = state.chars.map(c => ({
     source: c.source, name: c.name,
     outfit: { ...c.outfit }, colors: { ...c.colors },
-    expression: c.expression, weight: c.weight, text: c.text,
+    expression: c.expression, weight: c.weight, text: c.text, condition: c.condition || '',
   }));
   const spec = {
     characters: chars,

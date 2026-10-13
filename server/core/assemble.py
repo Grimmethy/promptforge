@@ -52,10 +52,19 @@ def character_segment(ch):
     # preset
     doc = data.get_character(ch.get("name", ""))
     base = str(doc.get("base", ""))
-    seg = data.normalize_kw(base, outfit_kw, expr_kw, custom)
+    # A condition (ch["condition"], an id from the character's CharacterForge ladder: tired,
+    # bruised, gaunt...) adds that rung's look and negatives on top of the base. Unknown ids
+    # (a ladder edited since the shot was saved) apply nothing rather than failing the shot.
+    cond = _condition(doc, ch.get("condition"))
+    seg = data.normalize_kw(base, cond.get("keywords", ""), outfit_kw, expr_kw, custom)
     seg = data.apply_weight(seg, weight)
-    neg = data.normalize_kw(str(doc.get("negative_add", "")))
+    neg = data.normalize_kw(str(doc.get("negative_add", "")), cond.get("negative", ""))
     return seg, neg
+
+
+def _condition(doc, cid):
+    want = str(cid or "").strip().lower()
+    return next((r for r in doc.get("conditions") or [] if r["id"] == want), {}) if want else {}
 
 
 # -------------------------------------------------------------------- assembler
