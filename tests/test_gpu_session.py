@@ -26,6 +26,7 @@ class Base(unittest.TestCase):
         self.resident = list(QWEN)
         self.comfy_up = False
         self.busy = False
+        self.queue_busy = False
         ps = [
             mock.patch.object(cp, "COMFY_LEASE_PATH", self.lease),
             mock.patch.object(gs, "LOCKS_DIR", self.locks),
@@ -37,6 +38,7 @@ class Base(unittest.TestCase):
             mock.patch.object(cp, "gpu_inventory", lambda: [{"index": 0, "free_mb": 20000, "total_mb": 24000}]),
             mock.patch.object(gs, "stop_comfyui_anywhere", self._stop),
             mock.patch.object(gs, "_ensure_keeper", lambda: None),
+            mock.patch.object(gs, "comfy_queue_busy", lambda: self.queue_busy),
         ]
         for p in ps:
             p.start()
@@ -167,6 +169,13 @@ class YieldAndEndTests(Base):
         self.assertTrue(gs.yield_to_pipeline()["yielded"])
         self.assertEqual(self.calls, [("stop_comfy",)])
         self.assertFalse(os.path.exists(self.lease))
+
+    def test_yield_is_refused_while_comfyui_itself_is_rendering_even_with_no_session(self):
+        self.comfy_up = True
+        self.queue_busy = True           # e.g. ComfyUI launched by hand with a job in its queue
+        r = gs.yield_to_pipeline()
+        self.assertFalse(r["yielded"])
+        self.assertEqual(self.calls, [])
 
     def test_yield_without_a_session_still_stops_a_stray_comfyui(self):
         self.comfy_up = True

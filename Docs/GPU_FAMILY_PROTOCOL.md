@@ -11,7 +11,8 @@ other and clears the GPU, so the active family has the whole card and the machin
 | `comfyui-lease.json` (`~/.local/state/agent-manager/`) | the single shared flag. Present and fresh = Forge family holds the GPU |
 | PromptForge `server/core/gpu_session.py` | the Forge family's **GPU broker**. HTTP API below; every other Forge component uses it over HTTP (no shared code) |
 | Agent Manager lanes (`local-worker.sh`, `review-runner.sh`, `gpu-guard.js`) | already yield their ticks while the lease is fresh |
-| `scripts/launch.sh` (Agent Manager) | explicit pipeline start deletes the lease: the pipeline wins |
+| `scripts/launch.sh` (Agent Manager) | explicit pipeline start deletes the lease and calls `/api/gpu/yield`: the pipeline wins |
+| `gpu-guard.js` (Agent Manager, per tick) | with no lease and ComfyUI still up, calls `/api/gpu/yield` (branch `feat/forge-gpu-yield`, pending merge) |
 
 ## Forge session (what "taking the GPU" means)
 `POST /api/gpu/acquire {owner}` (PromptForge `:7430`) does, in order:
@@ -30,7 +31,7 @@ A session **ends** (lease deleted **and ComfyUI stopped**, so VRAM and RAM are f
 - the lease disappears: the pipeline was started explicitly. The keeper notices within 20 s; a running job
   is told "the agent-manager pipeline reclaimed the GPU"; or
 - 4 hours pass; or
-- the pipeline asks: `POST /api/gpu/yield` is granted unless a Forge job is running right now.
+- the pipeline asks: `POST /api/gpu/yield` is granted unless a Forge job is running right now (a PromptForge job, or anything in ComfyUI's own queue).
 
 The pipeline reloads its model by itself on its next tick once the lease is gone.
 
@@ -52,6 +53,6 @@ The pipeline reloads its model by itself on its next tick once the lease is gone
 ## Known edges
 - Evicting while a pipeline call is mid-flight is avoided by step 2; a call that starts in the same instant fails
   and is retried by the pipeline like any other transient failure.
-- The pipeline's own `gpu-guard.js` `/free` path still reclaims an idle ComfyUI that has no session.
+- The pipeline's own `gpu-guard.js` `/free` path still reclaims a ComfyUI that PromptForge cannot be asked about.
 - If PromptForge is down, Forge components cannot take the GPU; ComfyUI started by hand has no session and is only
   stopped when the pipeline asks (`/api/gpu/yield`) or via PromptForge's Stop button.

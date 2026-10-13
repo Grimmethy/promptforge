@@ -35,6 +35,7 @@ import signal
 import subprocess
 import threading
 import time
+import urllib.request
 
 from . import comfy_proc
 
@@ -90,6 +91,16 @@ def inflight_pipeline_calls(locks_dir=None, now=None):
         except (OSError, ValueError):
             continue
     return out
+
+
+def comfy_queue_busy():
+    """True if ComfyUI is executing a prompt right now (also catches a manually launched ComfyUI that PromptForge
+    knows nothing about, so the pipeline's yield request never kills someone's render)."""
+    try:
+        with urllib.request.urlopen(comfy_proc.COMFY_URL + "/queue", timeout=3) as r:
+            return bool(json.load(r).get("queue_running"))
+    except Exception:
+        return False
 
 
 def comfy_listener_pid(port=None):
@@ -275,10 +286,10 @@ def _end_locked(reason, stop_comfy):
 def yield_to_pipeline():
     """The pipeline asks for the GPU. Granted unless a Forge job is running right now."""
     with _lock:
-        if _session and _activity_probe():
+        if _activity_probe() or comfy_queue_busy():
             return {"yielded": False, "reason": "a Forge job is running"}
     ended = end("pipeline-requested", stop_comfy=True)
-    if not ended and comfy_proc.comfy_up() and not _activity_probe():
+    if not ended and comfy_proc.comfy_up():
         stop_comfyui_anywhere()      # ComfyUI left running with no session (manual launch): stop it too
     return {"yielded": True, "reason": "forge session ended" if ended else "no session"}
 
