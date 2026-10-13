@@ -20,7 +20,10 @@ logger = logging.getLogger(__name__)
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(os.path.dirname(_HERE), "web")
-GALLERY_DIR = os.path.join(os.path.dirname(_HERE), "gallery")
+# PROMPTFORGE_GALLERY_DIR lets a checkout/worktree serve the one real gallery: the images are gitignored,
+# so a second worktree (the agent-manager-launched promptforge-manual) otherwise starts with an empty grid.
+GALLERY_DIR = os.path.abspath(os.path.expanduser(
+    os.environ.get("PROMPTFORGE_GALLERY_DIR") or os.path.join(os.path.dirname(_HERE), "gallery")))
 COMFY_URL = os.environ.get("COMFY_URL", "http://127.0.0.1:8188").rstrip("/")
 
 app = Flask(__name__, static_folder=None)
