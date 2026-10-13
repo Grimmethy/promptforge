@@ -43,6 +43,7 @@ explicit `bash scripts/launch.sh` on the agent-manager side).
 | `COMFY_CUDA_DEVICE` | `0` | ComfyUI's target GPU index; another GPU with room is preferred over evicting |
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | queried for resident models (`/api/ps`) and eviction (`/api/generate` `keep_alive:0`) |
 | `COMFY_LEASE_PATH` | `~/.local/state/agent-manager/comfyui-lease.json` | shared lease file; must match agent-manager's `AGENT_MANAGER_COMFY_LEASE_PATH` |
+| `PROMPTFORGE_GALLERY_DIR` | `<checkout>/gallery` | where generated images live. Images are gitignored, so a second checkout/worktree must point this at the real gallery or it shows an empty grid |
 
 ## Layout
 
