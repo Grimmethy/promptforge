@@ -6,3 +6,5 @@ gallery/*
 .env
 # explicit-content overlay merged in only while the NSFW toggle is on
 data/nsfw/
+
+# Agent Manager pipeline runtime data: written into the active project's repo, not source.\ngraphify-out/\ntask-logs/
