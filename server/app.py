@@ -13,7 +13,7 @@ import urllib.request
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from core import (assemble, cf_characters, comfy, comfy_proc, data, pose_ops, randomizer, rig,
+from core import (assemble, cf_characters, comfy, comfy_proc, data, gpu_session, pose_ops, randomizer, rig,
                   secondbrain, themes, thumbs)
 
 logger = logging.getLogger(__name__)
@@ -110,6 +110,45 @@ def comfy_status():
         })
 
 
+# ------------------------------------------------------------ Forge GPU session (family exclusion)
+# One HTTP surface for every Forge component (VideoForge, scripts, ...) so they need no shared code.
+# Protocol: Docs/GPU_FAMILY_PROTOCOL.md. acquire = pipeline's model evicted + ComfyUI up; heartbeat while
+# working; release = lease dropped and ComfyUI stopped; yield = the pipeline asking for the card back.
+
+@app.route("/api/gpu/status")
+def gpu_status():
+    return jsonify(gpu_session.status())
+
+
+@app.route("/api/gpu/acquire", methods=["POST"])
+def gpu_acquire():
+    owner = str((request.get_json(silent=True) or {}).get("owner") or "").strip()[:40]
+    if not owner:
+        return jsonify({"error": "owner is required"}), 400
+    try:
+        return jsonify({**gpu_session.begin(owner), "status": gpu_session.status()})
+    except (comfy_proc.ComfyUnavailable, gpu_session.SessionError) as exc:
+        return jsonify({"error": str(exc)}), 503
+
+
+@app.route("/api/gpu/heartbeat", methods=["POST"])
+def gpu_heartbeat():
+    owner = str((request.get_json(silent=True) or {}).get("owner") or "").strip()[:40]
+    if not gpu_session.touch(owner or None):
+        return jsonify({"error": "no active session (the pipeline may have reclaimed the GPU)"}), 409
+    return jsonify({"ok": True})
+
+
+@app.route("/api/gpu/release", methods=["POST"])
+def gpu_release():
+    return jsonify({"ended": gpu_session.end("released", stop_comfy=True), **{"comfy_up": comfy_proc.comfy_up()}})
+
+
+@app.route("/api/gpu/yield", methods=["POST"])
+def gpu_yield():
+    return jsonify(gpu_session.yield_to_pipeline())
+
+
 @app.route("/api/comfy/start", methods=["POST"])
 def comfy_start():
     try:
@@ -135,9 +174,12 @@ def comfy_stop():
 def presets():
     preset_chars = []
     for name in data.list_characters():
+        doc = data.get_character(name)
         preset_chars.append({
             "source": "preset", "name": name,
-            "default_outfit": data.get_character(name).get("default_outfit"),
+            "default_outfit": doc.get("default_outfit"),
+            # CharacterForge condition ladder (id + label), in worst-last order; [] if none
+            "conditions": [{"id": r["id"], "name": r["name"]} for r in doc.get("conditions") or []],
         })
     # With CharacterForge present it is the single character source (Second Brain notes and
     # the local presets were imported into it), so the vault list would only duplicate them.

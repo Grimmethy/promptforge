@@ -22,7 +22,7 @@ import urllib.parse
 import urllib.request
 import uuid
 
-from . import comfy_proc
+from . import comfy_proc, gpu_session
 
 COMFY_URL = os.environ.get("COMFY_URL", "http://127.0.0.1:8188").rstrip("/")
 CN_MODEL = os.environ.get("PROMPTFORGE_CN_MODEL", "controlnet-openpose-sdxl-1.0.safetensors")
@@ -44,6 +44,9 @@ _refresher_lock = threading.Lock()
 def _any_active_job():
     with _JOBS_LOCK:
         return any(r.get("status") in _ACTIVE_STATES for r in _JOBS.values())
+
+
+gpu_session.set_activity_probe(_any_active_job)
 
 
 def _lease_refresher():
@@ -241,16 +244,12 @@ def _run(job, rec, gallery_dir):
         _lease_stomped = False
         _set(rec, status="starting-comfyui", comfy_step="checking GPU…")
         try:
-            result = comfy_proc.ensure_gpu_for_generation(
-                set_step=lambda s: _set(rec, comfy_step=s),
-                job_id=job["id"],
-            )
-        except comfy_proc.ComfyUnavailable as exc:
+            # Forge family takes the whole GPU: pipeline model evicted, session lease kept fresh by
+            # gpu_session's keeper (see gpu_session.py). Idle sessions end and stop ComfyUI.
+            gpu_session.begin("promptforge", set_step=lambda s: _set(rec, comfy_step=s))
+        except (comfy_proc.ComfyUnavailable, gpu_session.SessionError) as exc:
             _set(rec, status="error", error=str(exc))
-            comfy_proc.lease_release()
             return
-        if result.get("lease_taken"):
-            _start_lease_refresher()
 
         if job.get("skeleton_png"):
             name = upload_image(job["skeleton_png"], f"promptforge_pose_{job['id'][:8]}.png")
@@ -311,17 +310,15 @@ def _run(job, rec, gallery_dir):
     except urllib.error.HTTPError as exc:
         _set(rec, status="error", error=f"{exc.code}: {exc.read().decode()[:400]}")
     except Exception as exc:  # noqa: BLE001
-        if _lease_stomped:
+        if _lease_stomped or gpu_session.last_end_reason == "pipeline-reclaimed":
             _set(rec, status="error", error=(
                 "the agent-manager pipeline reclaimed the GPU -- stop it, or "
                 "retry once it settles"))
         else:
             _set(rec, status="error", error=str(exc))
     finally:
-        # A job that finished before the refresher's next tick still needs the
-        # lease dropped promptly if nothing else is active.
-        if not _any_active_job() and comfy_proc.lease_held():
-            comfy_proc.lease_release()
+        # The session (not the job) owns the lease now; a finished job just counts as activity.
+        gpu_session.touch("promptforge")
 
 
 def get_job(jid):
