@@ -106,6 +106,48 @@ class ResolveTest(unittest.TestCase):
         self.assertEqual(j["prompt_used"]["positive"], j["positive"])
 
 
+class PromptLeadTest(unittest.TestCase):
+    """`prompt_lead` (a sentence from the caller, e.g. a StoryForge shot) + the characters' descriptions + the style, as ONE natural-language
+    prompt for Krea 2: no SDXL quality tags, no (word:1.1) weight syntax, left/right labels for two characters."""
+
+    def resolve(self, chars, **spec):
+        with mock.patch.object(pf, "list_checkpoints", return_value=["novaFurryXL_ilV140.safetensors"]):
+            return pf.resolve_job(dict({"model": KREA, "characters": chars, "style": "watercolor"}, **spec))
+
+    A = {"source": "custom", "name": "Pig", "text": "anthro, pig, (snout:1.1), brown waistcoat, (flat cap:1.2)"}
+    B = {"source": "custom", "name": "Goat", "text": "anthro, goat, (goat horns:1.1), rope belt"}
+
+    def test_weights_and_parentheses_are_stripped_from_tag_text(self):
+        self.assertEqual(comfy.plain_tags("anthro, (snout:1.1), (flat cap:1.2), (a, b:0.9), plain"), "anthro, snout, flat cap, a, b, plain")
+
+    def test_two_characters_are_labelled_left_and_right_after_the_lead(self):
+        j = self.resolve([self.A, self.B], prompt_lead="A pig cracks a whip at a goat in a granary, wide shot")
+        p = j["positive"]
+        self.assertTrue(p.startswith("A pig cracks a whip at a goat in a granary, wide shot"))
+        self.assertIn("On the left: anthro, pig, snout, brown waistcoat, flat cap", p)
+        self.assertIn("On the right: anthro, goat, goat horns, rope belt", p)
+        self.assertLess(p.index("On the left"), p.index("On the right"))
+        self.assertNotIn("(", p)
+        self.assertNotIn("masterpiece", p)
+        self.assertEqual(j["prompt_used"]["positive"], p)
+
+    def test_one_character_and_no_character_leads_still_carry_the_style(self):
+        one = self.resolve([self.A], prompt_lead="A pig dozes on sacks")["positive"]
+        self.assertIn("A pig dozes on sacks", one)
+        self.assertIn("anthro, pig, snout", one)
+        self.assertIn("watercolor", one.lower())
+        none = self.resolve([], prompt_lead="An empty granary at dawn")["positive"]
+        self.assertTrue(none.startswith("An empty granary at dawn"))
+        self.assertIn("watercolor", none.lower())
+
+    def test_prompt_text_still_overrides_everything_and_an_sdxl_job_ignores_the_lead(self):
+        j = self.resolve([self.A], prompt_lead="lead", prompt_text="the whole prompt")
+        self.assertEqual(j["positive"], "the whole prompt")
+        sdxl = self.resolve([self.A], model="novaFurryXL_ilV140.safetensors", prompt_lead="lead")
+        self.assertNotIn("lead", sdxl["positive"])
+        self.assertIn("masterpiece", sdxl["positive"])
+
+
 class ModelListTest(unittest.TestCase):
     def test_only_krea2_diffusion_models_are_added_and_prefixed(self):
         def fake(path, timeout=5):

@@ -545,6 +545,7 @@ def resolve_job(spec):
         frame = pose_ops.transform(frame, canvas_w=j["width"], canvas_h=j["height"])
         j["skeleton_png"] = pose_ops.render_png(frame, j["width"], j["height"])
     j["pose_tags"] = pose_tags
+    j["scene_tags"] = scene_tags
 
     # A rear camera contradicts the character's face/front-of-body tokens.
     #  - 3/4 .. near-profile-back (|yaw| > 0.55): just drop gaze-at-camera.
@@ -590,6 +591,10 @@ def resolve_job(spec):
         if j.pop("skeleton_png", None):
             j["warnings"] = ["pose skeleton ignored: Krea 2 has no ControlNet in PromptForge yet"]
         text = (spec.get("prompt_text") or "").strip()
+        lead = (spec.get("prompt_lead") or "").strip()
+        if lead and not text:
+            # a sentence from the caller (a StoryForge shot) + the characters' descriptions + the style, as one natural-language prompt
+            text = comfy.krea2_prompt(lead, [x["segment"] for x in j["char_segments"]], j["scene_tags"])
         if text:    # Krea 2 reads natural language: a caller may hand over the sentence prompt instead of the tag soup
             j["positive"] = text
             j["prompt_used"] = {"positive": text, "negative": j["negative"]}
