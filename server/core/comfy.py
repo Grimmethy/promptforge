@@ -149,8 +149,49 @@ def _smz(text, clip_ref, w, h):
         "target_width": w, "target_height": h, "text_g": "", "text_l": ""}}
 
 
+# --- Krea 2 Turbo -----------------------------------------------------------------------------------------------------------------------
+# A model named "krea2:<file>" is a diffusion model in ComfyUI's diffusion_models/ folder (not a checkpoint): it needs its own Qwen3-VL text
+# encoder and VAE, and runs a distilled 8-step, cfg 1 graph with a zeroed negative. There is no ControlNet for it here (the openpose one is
+# SDXL-only), so a pose skeleton is dropped (resolve_job warns).
+KREA2_PREFIX = "krea2:"
+KREA2_TE = os.environ.get("PROMPTFORGE_KREA2_TE", "qwen3vl_4b_fp8_scaled.safetensors")
+KREA2_VAE = os.environ.get("PROMPTFORGE_KREA2_VAE", "qwen_image_vae.safetensors")
+
+
+def is_krea2(model):
+    return str(model or "").startswith(KREA2_PREFIX)
+
+
+def build_krea2_graph(job):
+    """The official Comfy-Org Krea-2 Turbo text-to-image graph: UNET + Qwen3-VL CLIP (type krea2) + VAE, the positive encoded once and a
+    zeroed copy of it as the negative, one KSampler (8 steps, cfg 1, euler/simple), decode, save."""
+    positive = (job.get("positive") or "").strip() or ". ".join(
+        t for t in (job.get("base"), job.get("region_a"), job.get("region_b")) if t)
+    return {
+        "1": {"class_type": "UNETLoader",
+              "inputs": {"unet_name": str(job["model"])[len(KREA2_PREFIX):], "weight_dtype": "default"}},
+        "2": {"class_type": "CLIPLoader",
+              "inputs": {"clip_name": os.environ.get("PROMPTFORGE_KREA2_TE", KREA2_TE), "type": "krea2", "device": "default"}},
+        "3": {"class_type": "VAELoader",
+              "inputs": {"vae_name": os.environ.get("PROMPTFORGE_KREA2_VAE", KREA2_VAE)}},
+        "6": {"class_type": "CLIPTextEncode", "inputs": {"text": positive, "clip": ["2", 0]}},
+        "7": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["6", 0]}},
+        "10": {"class_type": "EmptyLatentImage",
+               "inputs": {"width": int(job["width"]), "height": int(job["height"]), "batch_size": int(job["batch"])}},
+        "11": {"class_type": "KSampler", "inputs": {
+            "seed": int(job["seed"]), "steps": int(job["steps"]), "cfg": float(job["cfg"]),
+            "sampler_name": job["sampler"], "scheduler": job["scheduler"], "denoise": 1.0,
+            "model": ["1", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["10", 0]}},
+        "12": {"class_type": "VAEDecode", "inputs": {"samples": ["11", 0], "vae": ["3", 0]}},
+        "13": {"class_type": "SaveImage",
+               "inputs": {"filename_prefix": f"promptforge_{job['id'][:8]}", "images": ["12", 0]}},
+    }
+
+
 def build_graph(job):
     """job: resolved dict (see module docstring / generate()). Returns API graph."""
+    if is_krea2(job.get("model")):
+        return build_krea2_graph(job)
     w, h = int(job["width"]), int(job["height"])
     seed = int(job["seed"])
     n = job["n_chars"]
@@ -223,7 +264,7 @@ def start(job, gallery_dir):
 
     rec = {"id": jid, "status": "starting", "images": [], "error": None,
            "seed": job["seed"], "spec": job.get("spec"),
-           "prompt_used": job.get("prompt_used")}
+           "prompt_used": job.get("prompt_used"), "warnings": list(job.get("warnings") or [])}
     with _JOBS_LOCK:
         _JOBS[jid] = rec
 
