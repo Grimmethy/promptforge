@@ -71,6 +71,22 @@ def list_checkpoints():
         return []
 
 
+def list_krea2_models():
+    """Krea 2 diffusion models ComfyUI has in diffusion_models/, as "krea2:<file>" (comfy.KREA2_PREFIX): they are not checkpoints."""
+    try:
+        oi = _comfy_get("/object_info/UNETLoader")
+        opts = oi["UNETLoader"]["input"]["required"]["unet_name"][0]
+        return sorted(comfy.KREA2_PREFIX + n for n in opts if str(n).lower().startswith("krea2_"))
+    except Exception as exc:
+        logger.warning("list_krea2_models: ComfyUI UNETLoader query failed: %s", exc)
+        return []
+
+
+def list_models():
+    """Every model a job can name: the SDXL checkpoints, then the Krea 2 diffusion models."""
+    return list_checkpoints() + list_krea2_models()
+
+
 def _comfy_log_tail(n=40):
     try:
         with open(comfy_proc.COMFY_LOG, "rb") as f:
@@ -99,7 +115,7 @@ def comfy_status():
             "up": True,
             "vram_free": dev.get("vram_free"),
             "vram_total": dev.get("vram_total"),
-            "checkpoints": list_checkpoints(),
+            "checkpoints": list_models(),
             **_comfy_extra_status(),
         })
     except Exception as exc:  # noqa: BLE001
@@ -213,7 +229,7 @@ def presets():
             "species": randomizer.species_choices(),
             "outfit_styles": randomizer.style_choices(),
         },
-        "checkpoints": list_checkpoints(),
+        "checkpoints": list_models(),
         "secondbrain_dir": secondbrain.SB_DIR or None,
     })
 
@@ -564,6 +580,19 @@ def resolve_job(spec):
             "char_segments": char_segs})
         j["positive"] = built["positive"]
         j["prompt_used"] = {"positive": j["positive"], "negative": j["negative"]}
+
+    if comfy.is_krea2(j["model"]):
+        # Krea 2 Turbo is distilled: 8 steps, cfg 1, euler/simple. The SDXL defaults would ruin it, so an unspecified value gets the Krea
+        # one and an explicit one is honoured. There is no ControlNet for it: a pose skeleton is dropped, loudly.
+        for k, v in (("steps", 8), ("cfg", 1.0), ("sampler", "euler"), ("scheduler", "simple")):
+            if spec.get(k) is None:
+                j[k] = v
+        if j.pop("skeleton_png", None):
+            j["warnings"] = ["pose skeleton ignored: Krea 2 has no ControlNet in PromptForge yet"]
+        text = (spec.get("prompt_text") or "").strip()
+        if text:    # Krea 2 reads natural language: a caller may hand over the sentence prompt instead of the tag soup
+            j["positive"] = text
+            j["prompt_used"] = {"positive": text, "negative": j["negative"]}
 
     j["spec"] = spec
     j["nsfw"] = nsfw
