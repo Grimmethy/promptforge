@@ -60,6 +60,16 @@ class MobileLayoutTest(unittest.TestCase):
         self.assertRegex(rule(css, "#viewBar") or "", r"display:\s*none")           # the base rule: not on a desktop
         self.assertRegex(rule(media_block(css), "#viewBar") or "", r"display:\s*flex")
 
+    def test_the_view_switch_is_at_the_top_of_the_page_not_fixed_to_the_bottom(self):
+        # a phone's address bar can sit at the BOTTOM of the screen (and a plugin frame sized with 100vh runs under it): a bar fixed to the
+        # bottom edge was covered by it (reported 2026-10-14), so the bar is the first row of the page instead
+        phone = media_block(read("style.css"))
+        bar = rule(phone, "#viewBar") or ""
+        self.assertRegex(bar, r"order:\s*-1")
+        self.assertNotRegex(bar, r"position:\s*fixed")
+        self.assertNotRegex(bar, r"(?<![-\w])bottom:")      # a positioned bottom edge (border-bottom is fine)
+        self.assertNotRegex(rule(phone, "body") or "", r"padding-bottom")
+
     def test_the_page_has_the_switch_with_both_views_and_the_script_drives_it(self):
         html, js = read("index.html"), read("app.js")
         self.assertIn('id="viewBar"', html)

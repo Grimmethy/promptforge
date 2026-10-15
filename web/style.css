@@ -148,16 +148,16 @@ details.presetEd textarea.yaml { width: 100%; margin: 6px 0; font: 11px/1.4 ui-m
 
 /* Phone layout (<= 860px). The desktop layout is a 400px input panel beside the gallery on a body that cannot scroll; on a ~400px phone that
    put the whole screen into the input panel and pushed the image library off the right edge with nothing to scroll to. Here the panels stack
-   and ONE shows at a time, switched by the Create / Gallery bar (#viewBar, JS toggles body.view-gallery). */
+   and ONE shows at a time, switched by the Create / Gallery bar (#viewBar, JS toggles body.view-gallery). The bar is the FIRST row, not fixed to the
+   bottom: a phone's address bar can sit at the bottom of the screen and covered it. */
 #viewBar { display: none; }
 @media (max-width: 860px) {
-  body { flex-direction: column; height: 100dvh; padding-bottom: 46px; box-sizing: border-box; }
+  body { flex-direction: column; height: 100dvh; }
   #inputs { width: 100%; min-width: 0; border-right: none; flex: 1; min-height: 0; }
   #gallery { flex: 1; min-height: 0; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); grid-auto-rows: 140px; }
   body.view-gallery #inputs { display: none; }
   body:not(.view-gallery) #gallery { display: none; }
-  #viewBar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; height: 46px; z-index: 40;
-             background: var(--panel2); border-top: 2px solid var(--border); }
+  #viewBar { display: flex; order: -1; flex: none; height: 46px; background: var(--panel2); border-bottom: 2px solid var(--border); }
   #viewBar button { flex: 1; border: none; background: none; color: var(--muted); font-size: 14px; cursor: pointer; }
   #viewBar button.on { color: var(--text); box-shadow: inset 0 -3px 0 var(--accent, #6ea8fe); }
   #lightbox { flex-direction: column; padding: 12px; overflow: auto; justify-content: flex-start; }
