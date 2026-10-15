@@ -170,11 +170,42 @@ def plain_tags(text):
     return re.sub(r":-?\d+(?:\.\d+)?(?=\s*(?:,|$))", "", t).strip(" ,")      # and a bare "word:1.3" weight left without parentheses
 
 
+# Tag-list words that mean nothing to a natural-language model, and the props a character's text holds ("(holding a whip:1.1)", "ledger at belt"):
+# a prop in the character beats the shot's own action, so the shot's sentence names what is held instead.
+_META_TAGS = {"1other", "1boy", "1girl", "2boys", "2girls", "anthro", "furry", "caprine", "male", "female", "solo"}
+_PROP_TAG = re.compile(r"^(holding|carrying|wielding|gripping|clutching|hauling|dragging|lugging)\b|\bat (his |her |the )?belt\b", re.I)
+_SPECIES = ("pig", "goat", "wolf", "fox", "rabbit", "cat", "dog", "mouse", "rat", "bear", "horse", "sheep", "cow", "deer", "owl", "crow", "lizard")
+
+
+def _split_tags(text):
+    out, depth, cur = [], 0, []
+    for ch in str(text or ""):
+        depth += ch == "("
+        depth -= ch == ")" and depth > 0
+        if ch == "," and depth == 0:
+            out.append("".join(cur).strip())
+            cur = []
+        else:
+            cur.append(ch)
+    out.append("".join(cur).strip())
+    return [t for t in out if t]
+
+
+def describe_character(text):
+    """A character's tag text as words for Krea 2: "an upright anthropomorphic pig with a pig head, <the other tags>" (species from the tags when
+    `anthro` / `furry` marks an animal person), without the tag meta words and without prop tags."""
+    tags = [plain_tags(t) for t in _split_tags(text)]
+    species = next((t.lower() for t in tags if t.lower() in _SPECIES), None) if any(t.lower() in ("anthro", "furry") for t in tags) else None
+    keep = [t for t in tags if t and t.lower() not in _META_TAGS and t.lower() != species and not _PROP_TAG.search(t)]
+    head = ["an upright anthropomorphic %s with a %s head" % (species, species)] if species else []
+    return ", ".join(head + keep)
+
+
 def krea2_prompt(lead, segments, style_tags):
     """One natural-language prompt for Krea 2: the caller's sentence `lead`, then each character's description (two characters labelled left /
     right, A first, as PromptForge's regional layout does), then the style. No SDXL quality tags, no weight syntax."""
     parts = [str(lead).strip().rstrip(".")]
-    segs = [plain_tags(x) for x in segments if plain_tags(x)]
+    segs = [describe_character(x) for x in segments if describe_character(x)]
     if len(segs) == 2:
         parts += ["On the left: " + segs[0], "On the right: " + segs[1]]
     else:
