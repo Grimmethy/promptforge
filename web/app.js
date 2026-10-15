@@ -44,6 +44,10 @@ async function boot() {
     toast('pose reset');
   };
   $('#orientReset').onclick = () => editor.resetView();
+  // Phone layout: the Create / Gallery bar shows one panel at a time (style.css, body.view-gallery). A choice survives a reload.
+  const showView = v => { document.body.classList.toggle('view-gallery', v === 'gallery'); $$('#viewBar button').forEach(b => b.classList.toggle('on', b.dataset.view === v)); try { localStorage.setItem('pfView', v); } catch (e) { /* private mode: not remembered */ } };
+  $$('#viewBar button').forEach(b => { b.onclick = () => showView(b.dataset.view); });
+  showView((() => { try { return localStorage.getItem('pfView') === 'gallery' ? 'gallery' : 'create'; } catch (e) { return 'create'; } })());
   $('#generate').onclick = generate;
   $('#reroll').onclick = () => { $('#seed').value = -1; generate(); };
   $$('#inputs select, #inputs input, #inputs textarea').forEach(n => n.addEventListener('change', () => { persist(); schedulePreview(); }));
