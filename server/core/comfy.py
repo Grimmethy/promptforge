@@ -15,6 +15,7 @@ import io
 import json
 import os
 import random
+import re
 import threading
 import time
 import urllib.error
@@ -160,6 +161,28 @@ KREA2_VAE = os.environ.get("PROMPTFORGE_KREA2_VAE", "qwen_image_vae.safetensors"
 
 def is_krea2(model):
     return str(model or "").startswith(KREA2_PREFIX)
+
+
+def plain_tags(text):
+    """Tag text for a natural-language model: (word:1.1) weights and parentheses removed ("(snout:1.1), plain" -> "snout, plain")."""
+    t = re.sub(r"\(([^()]*?):-?\d+(?:\.\d+)?\)", r"\1", str(text or ""))
+    t = re.sub(r"[()]", "", t)
+    return re.sub(r":-?\d+(?:\.\d+)?(?=\s*(?:,|$))", "", t).strip(" ,")      # and a bare "word:1.3" weight left without parentheses
+
+
+def krea2_prompt(lead, segments, style_tags):
+    """One natural-language prompt for Krea 2: the caller's sentence `lead`, then each character's description (two characters labelled left /
+    right, A first, as PromptForge's regional layout does), then the style. No SDXL quality tags, no weight syntax."""
+    parts = [str(lead).strip().rstrip(".")]
+    segs = [plain_tags(x) for x in segments if plain_tags(x)]
+    if len(segs) == 2:
+        parts += ["On the left: " + segs[0], "On the right: " + segs[1]]
+    else:
+        parts += segs
+    style = plain_tags(style_tags)
+    if style:
+        parts.append("Style: " + style)
+    return ". ".join(p for p in parts if p)
 
 
 def build_krea2_graph(job):
