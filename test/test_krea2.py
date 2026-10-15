@@ -125,8 +125,8 @@ class PromptLeadTest(unittest.TestCase):
         j = self.resolve([self.A, self.B], prompt_lead="A pig cracks a whip at a goat in a granary, wide shot")
         p = j["positive"]
         self.assertTrue(p.startswith("A pig cracks a whip at a goat in a granary, wide shot"))
-        self.assertIn("On the left: anthro, pig, snout, brown waistcoat, flat cap", p)
-        self.assertIn("On the right: anthro, goat, goat horns, rope belt", p)
+        self.assertIn("On the left: an upright anthropomorphic pig with a pig head, snout, brown waistcoat, flat cap", p)
+        self.assertIn("On the right: an upright anthropomorphic goat with a goat head, goat horns, rope belt", p)
         self.assertLess(p.index("On the left"), p.index("On the right"))
         self.assertNotIn("(", p)
         self.assertNotIn("masterpiece", p)
@@ -135,7 +135,7 @@ class PromptLeadTest(unittest.TestCase):
     def test_one_character_and_no_character_leads_still_carry_the_style(self):
         one = self.resolve([self.A], prompt_lead="A pig dozes on sacks")["positive"]
         self.assertIn("A pig dozes on sacks", one)
-        self.assertIn("anthro, pig, snout", one)
+        self.assertIn("an upright anthropomorphic pig with a pig head, snout", one)
         self.assertIn("watercolor", one.lower())
         none = self.resolve([], prompt_lead="An empty granary at dawn")["positive"]
         self.assertTrue(none.startswith("An empty granary at dawn"))
@@ -147,6 +147,49 @@ class PromptLeadTest(unittest.TestCase):
         sdxl = self.resolve([self.A], model="novaFurryXL_ilV140.safetensors", prompt_lead="lead")
         self.assertNotIn("lead", sdxl["positive"])
         self.assertIn("masterpiece", sdxl["positive"])
+
+
+class DescribeCharacterTest(unittest.TestCase):
+    """A natural-language model needs the character in WORDS: tag text like "1other, anthro, furry, pig" makes Krea 2 draw a human (2026-10-14:
+    the overseer came out as a man with a whip). The species becomes a phrase, the tag meta words and the props (which would beat the shot's own
+    action) are dropped."""
+
+    OVERSEER = ("1other, anthro, furry, pig, (snout:1.1), pink skin, small tusks, curly tail, floppy ears, male, tall, heavy build, stern expression, "
+                "(plain linen shirt with rolled sleeves:1.2), (brown wool waistcoat with pewter buttons, buttoned up:1.1), dark knee breeches, "
+                "sturdy leather boots, simple dark brown flat cloth cap, (holding a whip:1.1), ledger at belt, looking down, smug, grin")
+    PEASANT = "1other, anthro, furry, goat, caprine, (goat horns:1.1), long ears, rough linen tunic, rope belt, (carrying a stone block:1.1), bruised face"
+
+    def test_the_species_becomes_a_phrase_and_the_meta_tags_go(self):
+        d = comfy.describe_character(self.OVERSEER)
+        self.assertTrue(d.startswith("an upright anthropomorphic pig"), d)
+        self.assertIn("pig head", d)
+        for gone in ("1other", "anthro,", "furry", ", pig,"):
+            self.assertNotIn(gone, d)
+        for kept in ("pink skin", "small tusks", "brown wool waistcoat", "flat cloth cap", "sturdy leather boots"):
+            self.assertIn(kept, d)
+
+    def test_props_are_dropped_because_the_shots_own_action_names_what_is_held(self):
+        d = comfy.describe_character(self.OVERSEER)
+        self.assertNotIn("whip", d)
+        self.assertNotIn("ledger", d)
+        g = comfy.describe_character(self.PEASANT)
+        self.assertNotIn("stone block", g)
+        self.assertIn("rope belt", g)                      # clothing, even though it says belt
+        self.assertTrue(g.startswith("an upright anthropomorphic goat"), g)
+        self.assertIn("horns", g)
+
+    def test_a_character_with_no_known_species_just_keeps_its_cleaned_tags(self):
+        d = comfy.describe_character("1girl, red coat, (holding a lantern:1.1), boots")
+        self.assertEqual(d, "red coat, boots")
+        self.assertEqual(comfy.describe_character(""), "")
+
+    def test_the_krea_prompt_uses_the_described_characters_and_carries_no_props(self):
+        p = comfy.krea2_prompt("A pig and a goat face off", [self.OVERSEER, self.PEASANT], "watercolor")
+        self.assertIn("On the left: an upright anthropomorphic pig", p)
+        self.assertIn("On the right: an upright anthropomorphic goat", p)
+        self.assertNotIn("whip", p)
+        self.assertNotIn("stone block", p)
+        self.assertNotIn("1other", p)
 
 
 class ModelListTest(unittest.TestCase):
