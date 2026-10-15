@@ -119,6 +119,7 @@ class PromptLeadTest(unittest.TestCase):
 
     def test_weights_and_parentheses_are_stripped_from_tag_text(self):
         self.assertEqual(comfy.plain_tags("anthro, (snout:1.1), (flat cap:1.2), (a, b:0.9), plain"), "anthro, snout, flat cap, a, b, plain")
+        self.assertEqual(comfy.plain_tags("watercolor medium:1.3, paper texture, soft edges:0.8"), "watercolor medium, paper texture, soft edges")
 
     def test_two_characters_are_labelled_left_and_right_after_the_lead(self):
         j = self.resolve([self.A, self.B], prompt_lead="A pig cracks a whip at a goat in a granary, wide shot")

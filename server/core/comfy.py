@@ -166,7 +166,8 @@ def is_krea2(model):
 def plain_tags(text):
     """Tag text for a natural-language model: (word:1.1) weights and parentheses removed ("(snout:1.1), plain" -> "snout, plain")."""
     t = re.sub(r"\(([^()]*?):-?\d+(?:\.\d+)?\)", r"\1", str(text or ""))
-    return re.sub(r"[()]", "", t).strip(" ,")
+    t = re.sub(r"[()]", "", t)
+    return re.sub(r":-?\d+(?:\.\d+)?(?=\s*(?:,|$))", "", t).strip(" ,")      # and a bare "word:1.3" weight left without parentheses
 
 
 def krea2_prompt(lead, segments, style_tags):
