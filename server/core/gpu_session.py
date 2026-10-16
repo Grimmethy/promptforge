@@ -179,7 +179,12 @@ def lease_intact():
 
 def status():
     with _lock:
-        s = dict(_session) if _session else None
+        s = None
+        if _session:
+            # The session carries a threading.Event ("ready") that JSON cannot serialise: the route returned HTTP 500 after the
+            # concurrent-start fix put it there. Report it as a boolean instead.
+            s = {k: v for k, v in _session.items() if k != "ready"}
+            s["ready"] = _session["ready"].is_set() if _session.get("ready") is not None else True
     inv = comfy_proc.gpu_inventory()
     return {"active": s is not None, "session": s, "comfy_up": comfy_proc.comfy_up(),
             "ollama_resident": comfy_proc.ollama_models_on_gpu(), "gpu": inv[:1] and inv[0] or None,
