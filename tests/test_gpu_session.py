@@ -161,6 +161,18 @@ class BeginTests(Base):
         self.assertIn("did not start", str(errors["b"]))
         self.assertIsNone(gs._session)
 
+    def test_status_is_json_serialisable_while_a_session_is_starting_and_after(self):
+        """The ready Event in the session dict made GET /api/gpu/status answer HTTP 500 ("Event is not JSON serializable")."""
+        self.assertIsNone(gs.status()["session"])
+        gs._session = {"owners": ["x"], "started": time.time(), "started_iso": gs._iso(), "last_activity": time.time(),
+                       "max_s": 99999, "idle_s": 99999, "ready": threading.Event(), "failed": None}
+        starting = json.loads(json.dumps(gs.status()))
+        self.assertIs(starting["session"]["ready"], False)
+        gs._session["ready"].set()
+        ready = json.loads(json.dumps(gs.status()))
+        self.assertIs(ready["session"]["ready"], True)
+        self.assertTrue(ready["active"])
+
     def test_a_late_job_after_the_session_is_ready_is_still_a_heartbeat(self):
         self.begin()
         self.calls.clear()
