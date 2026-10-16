@@ -627,6 +627,65 @@ def generate():
     return jsonify({"job_id": jid, "prompt_used": job["prompt_used"], "seed": job["seed"]})
 
 
+_REPAIRS = {}   # job_id -> (original RGBA, mask L): kept so the finished picture can be pasted back through the mask
+
+
+@app.route("/api/repair", methods=["POST"])
+def api_repair():
+    """Inpaint. multipart: image (PNG, alpha = holes), mask (PNG, white = repaint, optional), prompt, negative,
+    denoise (0.3-1.0, default 0.7), seed, model, steps, cfg. Returns {job_id}; poll /api/job/<id>, then GET
+    /api/repair/<id>/result.png for the original with only the masked part replaced."""
+    from PIL import Image
+    from core import repair
+    f = request.files.get("image")
+    if not f:
+        return jsonify({"error": "image is required"}), 400
+    try:
+        img = Image.open(f.stream).convert("RGBA")
+        m = request.files.get("mask")
+        mask = Image.open(m.stream).convert("L") if m else Image.new("L", img.size, 0)
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": f"bad image: {exc}"}), 400
+    prompt = (request.form.get("prompt") or "").strip()
+    if not prompt:
+        return jsonify({"error": "prompt is required"}), 400
+    img_png, mask_png, size = repair.prepare(img, mask)
+    j = dict(_DEFAULTS)
+    j.update(
+        positive=prompt, negative=(request.form.get("negative") or "").strip(),
+        denoise=min(1.0, max(0.2, float(request.form.get("denoise") or 0.7))),
+        seed=int(request.form.get("seed") or -1), steps=int(request.form.get("steps") or 28),
+        cfg=float(request.form.get("cfg") or 5.0), width=size[0], height=size[1], n_chars=1,
+        model=request.form.get("model") or (list_checkpoints() or ["novaFurryXL_ilV140.safetensors"])[0],
+        repair_image_png=img_png, repair_mask_png=mask_png,
+        spec={"repair": True, "prompt": prompt}, prompt_used={"positive": prompt, "negative": ""})
+    try:
+        jid = comfy.start(j, GALLERY_DIR)
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 400
+    _REPAIRS[jid] = (img, mask)
+    while len(_REPAIRS) > 20:
+        _REPAIRS.pop(next(iter(_REPAIRS)))
+    return jsonify({"job_id": jid, "seed": j["seed"], "model": j["model"]})
+
+
+@app.route("/api/repair/<jid>/result.png")
+def api_repair_result(jid):
+    import io
+    from PIL import Image
+    from core import repair
+    rec, orig = comfy.get_job(jid), _REPAIRS.get(jid)
+    if not rec or not orig:
+        return jsonify({"error": "unknown repair job"}), 404
+    if rec.get("status") != "done" or not rec.get("images"):
+        return jsonify({"error": "not finished", "status": rec.get("status")}), 409
+    path = _safe_gallery_path(rec["images"][0])
+    out = repair.finish(orig[0], orig[1], Image.open(path))
+    buf = io.BytesIO()
+    out.save(buf, "PNG")
+    return Response(buf.getvalue(), mimetype="image/png")
+
+
 @app.route("/api/job/<jid>")
 def job(jid):
     rec = comfy.get_job(jid)
