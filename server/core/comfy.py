@@ -242,6 +242,30 @@ def build_krea2_graph(job):
     }
 
 
+def build_repair_graph(job):
+    """Inpaint: checkpoint -> VAE-encode the picture -> noise mask (white = repaint, grown a little) -> KSampler at
+    `denoise` -> decode -> save. `image_name`/`mask_name` are files already uploaded to ComfyUI."""
+    prefix = f"promptforge_repair_{job['id'][:8]}"
+    return {
+        "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": job["model"]}},
+        "50": {"class_type": "CLIPSetLastLayer", "inputs": {"stop_at_clip_layer": -2, "clip": ["1", 1]}},
+        "6": {"class_type": "CLIPTextEncode", "inputs": {"text": job["positive"], "clip": ["50", 0]}},
+        "7": {"class_type": "CLIPTextEncode", "inputs": {"text": job["negative"], "clip": ["50", 0]}},
+        "20": {"class_type": "LoadImage", "inputs": {"image": job["image_name"]}},
+        "21": {"class_type": "LoadImageMask", "inputs": {"image": job["mask_name"], "channel": "red"}},
+        "22": {"class_type": "GrowMask", "inputs": {"mask": ["21", 0], "expand": int(job.get("grow", 6)),
+                                                      "tapered_corners": True}},
+        "23": {"class_type": "VAEEncode", "inputs": {"pixels": ["20", 0], "vae": ["1", 2]}},
+        "24": {"class_type": "SetLatentNoiseMask", "inputs": {"samples": ["23", 0], "mask": ["22", 0]}},
+        "11": {"class_type": "KSampler", "inputs": {
+            "seed": int(job["seed"]), "steps": int(job["steps"]), "cfg": float(job["cfg"]),
+            "sampler_name": job["sampler"], "scheduler": job["scheduler"], "denoise": float(job["denoise"]),
+            "model": ["1", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["24", 0]}},
+        "12": {"class_type": "VAEDecode", "inputs": {"samples": ["11", 0], "vae": ["1", 2]}},
+        "13": {"class_type": "SaveImage", "inputs": {"filename_prefix": prefix, "images": ["12", 0]}},
+    }
+
+
 def build_graph(job):
     """job: resolved dict (see module docstring / generate()). Returns API graph."""
     if is_krea2(job.get("model")):
@@ -346,11 +370,15 @@ def _run(job, rec, gallery_dir):
             _set(rec, status="error", error=str(exc))
             return
 
+        if job.get("repair_image_png"):
+            job["image_name"] = upload_image(job["repair_image_png"], f"promptforge_repair_{job['id'][:8]}.png")
+            job["mask_name"] = upload_image(job["repair_mask_png"], f"promptforge_repair_mask_{job['id'][:8]}.png")
+
         if job.get("skeleton_png"):
             name = upload_image(job["skeleton_png"], f"promptforge_pose_{job['id'][:8]}.png")
             job["skeleton_name"] = name
 
-        graph = build_graph(job)
+        graph = build_repair_graph(job) if job.get("repair_image_png") else build_graph(job)
         client_id = uuid.uuid4().hex
         _set(rec, status="queued")
         resp = _post("/prompt", {"prompt": graph, "client_id": client_id})

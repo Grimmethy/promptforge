@@ -55,7 +55,7 @@ COMFY_LEASE_PATH = os.path.expanduser(
     )
 )
 
-COMFY_START_TIMEOUT_S = int(os.environ.get("COMFY_START_TIMEOUT_S", "120"))
+COMFY_START_TIMEOUT_S = int(os.environ.get("COMFY_START_TIMEOUT_S", "300"))
 # VRAM ComfyUI (SDXL + ControlNet) needs to be considered "fits".
 COMFY_REQUIRED_VRAM_MB = int(os.environ.get("COMFY_REQUIRED_VRAM_MB", "9000"))
 # ComfyUI's default CUDA device; unset -> let ComfyUI pick (usually 0).
