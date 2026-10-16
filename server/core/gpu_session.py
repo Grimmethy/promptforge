@@ -46,6 +46,8 @@ SESSION_MAX_S = int(os.environ.get("FORGE_SESSION_MAX_S", str(4 * 3600)))
 KEEPER_TICK_S = int(os.environ.get("FORGE_KEEPER_TICK_S", "20"))
 LOCK_WAIT_S = int(os.environ.get("FORGE_LOCK_WAIT_S", "90"))
 EVICT_WAIT_S = int(os.environ.get("FORGE_EVICT_WAIT_S", "45"))
+# How long a second job waits for the job that is starting the session (90 s lock wait + 45 s eviction + a 2-5 min ComfyUI cold start).
+START_WAIT_S = int(os.environ.get("FORGE_START_WAIT_S", "600"))
 LOCKS_DIR = os.path.expanduser(os.environ.get(
     "AGENT_MANAGER_MODEL_LOCKS_DIR", "/media/model-cache/github/agent-manager/instances/.model-locks"))
 LOCK_STALE_S = 5 * 60   # matches agent-manager's model-inflight-lock STALE_MS
@@ -195,18 +197,28 @@ def begin(owner, set_step=None, sleep=time.sleep, now=time.time):
             except Exception:
                 pass
 
+    joining = None
     with _lock:
         if _session and lease_intact():
             _session["last_activity"] = now()
             _session["owners"] = sorted(set(_session.get("owners", [])) | {owner})
             write_lease(owner, keep_acquired=_session["started_iso"])
-            return {"started_session": False, "evicted": [], "comfy_started": False}
-        if _session:   # lease was stomped since the last keeper tick: that session is over
-            _end_locked("pipeline-reclaimed", stop_comfy=True)
-        started_iso = _iso()
-        write_lease(owner, keep_acquired=started_iso)
-        _session = {"owners": [owner], "started": now(), "started_iso": started_iso, "last_activity": now(),
-                    "max_s": SESSION_MAX_S, "idle_s": SESSION_IDLE_S}
+            ev = _session.get("ready")
+            if ev is None or (ev.is_set() and not _session.get("failed")):      # (no event: a session made by something other than begin())
+                return {"started_session": False, "evicted": [], "comfy_started": False}
+            joining = _session           # another job is still clearing the GPU / starting ComfyUI: wait for it below
+        else:
+            if _session:   # lease was stomped since the last keeper tick: that session is over
+                _end_locked("pipeline-reclaimed", stop_comfy=True)
+            started_iso = _iso()
+            write_lease(owner, keep_acquired=started_iso)
+            # "ready" is set when the GPU is cleared AND ComfyUI is up. A second job that arrives while the first is still starting
+            # ComfyUI used to take the "already live" path above, skip the wait and fail with "Connection refused" on its first upload.
+            _session = {"owners": [owner], "started": now(), "started_iso": started_iso, "last_activity": now(),
+                        "max_s": SESSION_MAX_S, "idle_s": SESSION_IDLE_S, "ready": threading.Event(), "failed": None}
+            mine = _session
+    if joining is not None:
+        return _join_starting(joining, step, sleep, now)
 
     # The keeper must be running BEFORE the slow part of begin(), not after it. Everything below can take minutes (up to
     # LOCK_WAIT_S for an in-flight pipeline call, the eviction, a cold ComfyUI start of 2-5 min), and the pipeline treats a
@@ -233,10 +245,26 @@ def begin(owner, set_step=None, sleep=time.sleep, now=time.time):
             step("starting ComfyUI…")
             comfy_started = comfy_proc.ensure_comfyui_ready(set_step=set_step, job_id=None).get("started", True)
         _check_ram(step, sleep, now)
-    except Exception:
+    except Exception as exc:
+        mine["failed"] = str(exc) or exc.__class__.__name__
+        mine["ready"].set()                       # wake any job waiting on this start: it reports the same failure
         end("begin-failed", stop_comfy=False)
         raise
+    mine["ready"].set()
     return {"started_session": True, "evicted": names, "comfy_started": comfy_started}
+
+
+def _join_starting(sess, step, sleep, now):
+    """A job that arrived while another is starting the session: wait until the GPU is cleared and ComfyUI is listening."""
+    step("waiting for the Forge GPU session another job is starting…")
+    deadline = now() + START_WAIT_S
+    while not sess["ready"].is_set():
+        if now() >= deadline:
+            raise SessionError("timed out waiting for the Forge GPU session that another job was starting")
+        sleep(1)
+    if sess.get("failed"):
+        raise SessionError("the Forge GPU session did not start: " + str(sess["failed"]))
+    return {"started_session": False, "evicted": [], "comfy_started": False}
 
 
 def _check_ram(step, sleep, now):
@@ -273,6 +301,9 @@ def end(reason="released", stop_comfy=True):
 def _end_locked(reason, stop_comfy):
     global _session, last_end_reason
     was = _session is not None
+    if was and _session.get("ready") is not None and not _session["ready"].is_set():
+        _session["failed"] = "the session ended while starting (%s)" % reason
+        _session["ready"].set()
     _session = None
     if was:
         last_end_reason = reason

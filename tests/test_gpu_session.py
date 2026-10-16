@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -105,6 +106,75 @@ class BeginTests(Base):
                 self.begin()
         self.assertFalse(os.path.exists(self.lease))
         self.assertIsNone(gs._session)
+
+    def _two_jobs(self, fail_after_start=False):
+        """Job A starts the session and blocks inside the ComfyUI start; job B arrives meanwhile. Returns (results, errors)."""
+        gate, entered = threading.Event(), threading.Event()
+
+        def slow_start(set_step=None, job_id=None):
+            self.calls.append(("start_comfy",))
+            entered.set()
+            gate.wait(5)
+            self.comfy_up = True
+            return {"started": True}
+        results, errors = {}, {}
+
+        def run(name, sleep):
+            try:
+                results[name] = gs.begin(name, sleep=sleep)
+            except Exception as exc:  # noqa: BLE001
+                errors[name] = exc
+        patches = [mock.patch.object(cp, "ensure_comfyui_ready", slow_start)]
+        if fail_after_start:
+            patches += [mock.patch.object(cp, "mem_available_mb", lambda: 100), mock.patch.object(cp, "COMFY_MIN_AVAILABLE_RAM_MB", 8000),
+                        mock.patch.object(cp, "COMFY_RAM_WAIT_S", 0)]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        a = threading.Thread(target=run, args=("a", lambda s: None))
+        a.start()
+        self.assertTrue(entered.wait(5))
+        b = threading.Thread(target=run, args=("b", lambda s: time.sleep(0.01)))
+        b.start()
+        time.sleep(0.2)
+        self.assertNotIn("b", results)           # B must NOT come back while ComfyUI is still starting
+        self.assertNotIn("b", errors)
+        gate.set()
+        a.join(5)
+        b.join(5)
+        return results, errors
+
+    def test_a_second_job_waits_for_the_first_to_finish_starting_comfyui(self):
+        """Seen live 2026-10-16: four Regenerate presses while ComfyUI was cold; jobs 2-4 took the 'live session' path, skipped the
+        wait and failed their first upload with Connection refused."""
+        results, errors = self._two_jobs()
+        self.assertEqual(errors, {})
+        self.assertTrue(results["a"]["started_session"])
+        self.assertFalse(results["b"]["started_session"])
+        self.assertEqual([c for c in self.calls if c[0] == "start_comfy"], [("start_comfy",)])     # ComfyUI started once
+        self.assertTrue(self.comfy_up)
+
+    def test_a_waiting_job_reports_the_failure_when_the_session_fails_to_start(self):
+        results, errors = self._two_jobs(fail_after_start=True)
+        self.assertIsInstance(errors["a"], cp.ComfyUnavailable)
+        self.assertIsInstance(errors["b"], gs.SessionError)
+        self.assertIn("did not start", str(errors["b"]))
+        self.assertIsNone(gs._session)
+
+    def test_a_late_job_after_the_session_is_ready_is_still_a_heartbeat(self):
+        self.begin()
+        self.calls.clear()
+        r = self.begin("another")
+        self.assertFalse(r["started_session"])
+        self.assertEqual(self.calls, [])
+
+    def test_waiting_gives_up_after_the_start_window(self):
+        gs._session = {"owners": ["x"], "started": time.time(), "started_iso": gs._iso(), "last_activity": time.time(),
+                       "max_s": 99999, "idle_s": 99999, "ready": threading.Event(), "failed": None}
+        gs.write_lease("x", keep_acquired=gs._iso())
+        with mock.patch.object(gs, "START_WAIT_S", 0):
+            with self.assertRaises(gs.SessionError):
+                gs.begin("late", sleep=lambda s: None)
 
     def test_waits_for_pipeline_inflight_call_then_proceeds(self):
         lock = os.path.join(self.locks, "1-a.json")

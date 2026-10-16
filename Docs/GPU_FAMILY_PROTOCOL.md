@@ -35,6 +35,11 @@ A session **ends** (lease deleted **and ComfyUI stopped**, so VRAM and RAM are f
 
 The pipeline reloads its model by itself on its next tick once the lease is gone.
 
+**Concurrent starts.** `acquire` / a job's `begin` is idempotent, but a job that arrives while another is still clearing the
+GPU or cold-starting ComfyUI (2-5 min) now **waits** for that start (up to `FORGE_START_WAIT_S`, default 600) instead of taking
+the "session already live" shortcut. Before this, four quick Regenerate presses all but the first failed their first upload with
+"Connection refused". If the starting job fails, the waiting ones fail with "the Forge GPU session did not start: ...".
+
 ## API (PromptForge `:7430`)
 `GET /api/gpu/status` · `POST /api/gpu/acquire {owner}` · `POST /api/gpu/heartbeat {owner}` ·
 `POST /api/gpu/release` · `POST /api/gpu/yield`
@@ -48,7 +53,7 @@ The pipeline reloads its model by itself on its next tick once the lease is gone
 
 ## Tunables (env, PromptForge)
 `FORGE_SESSION_IDLE_S` (1200) · `FORGE_SESSION_MAX_S` (14400) · `FORGE_KEEPER_TICK_S` (20) ·
-`FORGE_LOCK_WAIT_S` (90) · `FORGE_EVICT_WAIT_S` (45) · `AGENT_MANAGER_MODEL_LOCKS_DIR`.
+`FORGE_LOCK_WAIT_S` (90) · `FORGE_EVICT_WAIT_S` (45) · `FORGE_START_WAIT_S` (600) · `AGENT_MANAGER_MODEL_LOCKS_DIR`.
 
 ## Known edges
 - Evicting while a pipeline call is mid-flight is avoided by step 2; a call that starts in the same instant fails
