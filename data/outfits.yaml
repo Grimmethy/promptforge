@@ -37,7 +37,6 @@ female:
       witch: "{base} witch hat, layered dress, {contrast} corset, buckled boots"
       Denim Wizard: '{base} witch hat, coveralls, {contrast} loose sleeve button up shirt, buckled boots, {detail} stitched flower embroidery,'
     scavenger:
-      rags: "torn tattered rags, ragged loincloth, dirty, worn {base} leather straps"
       patched jacket: "{base} oversized patched jacket, utility belt, fingerless gloves, goggles on head"
   formal:
     gown:

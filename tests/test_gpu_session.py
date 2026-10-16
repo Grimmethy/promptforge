@@ -37,7 +37,7 @@ class Base(unittest.TestCase):
             mock.patch.object(cp, "mem_available_mb", lambda: 12000),
             mock.patch.object(cp, "gpu_inventory", lambda: [{"index": 0, "free_mb": 20000, "total_mb": 24000}]),
             mock.patch.object(gs, "stop_comfyui_anywhere", self._stop),
-            mock.patch.object(gs, "_ensure_keeper", lambda: None),
+            mock.patch.object(gs, "_ensure_keeper", lambda: self.calls.append(("keeper",))),
             mock.patch.object(gs, "comfy_queue_busy", lambda: self.queue_busy),
         ]
         for p in ps:
@@ -70,7 +70,7 @@ class BeginTests(Base):
         r = self.begin()
         self.assertTrue(r["started_session"])
         self.assertEqual(r["evicted"], ["qwen3.8:27b"])
-        self.assertEqual(self.calls, [("evict", ["qwen3.8:27b"]), ("start_comfy",)])
+        self.assertEqual(self.calls, [("keeper",), ("evict", ["qwen3.8:27b"]), ("start_comfy",)])
         d = json.load(open(self.lease))
         self.assertEqual((d["holder"], d["family"], d["owner"]), ("promptforge", "forge", "promptforge"))
         self.assertTrue(gs.lease_intact())
@@ -88,6 +88,24 @@ class BeginTests(Base):
         self.assertEqual(self.calls, [])
         self.assertEqual(gs._session["owners"], ["promptforge", "videoforge"])
 
+    def test_keeper_starts_before_the_slow_part_so_the_lease_cannot_go_stale(self):
+        """The pipeline treats a lease not refreshed for 90 s as released. begin() waits up to 90 s for an in-flight call,
+        evicts, and may cold-start ComfyUI for minutes, so the keeper has to be running before all of that."""
+        self.begin()
+        names = [c[0] for c in self.calls]
+        self.assertEqual(names.count("keeper"), 1)
+        self.assertLess(names.index("keeper"), names.index("evict"))
+        self.assertLess(names.index("keeper"), names.index("start_comfy"))
+
+    def test_a_failed_begin_still_clears_the_lease_with_the_early_keeper(self):
+        with mock.patch.object(cp, "mem_available_mb", lambda: 100), \
+                mock.patch.object(cp, "COMFY_MIN_AVAILABLE_RAM_MB", 8000), \
+                mock.patch.object(cp, "COMFY_RAM_WAIT_S", 0):
+            with self.assertRaises(cp.ComfyUnavailable):
+                self.begin()
+        self.assertFalse(os.path.exists(self.lease))
+        self.assertIsNone(gs._session)
+
     def test_waits_for_pipeline_inflight_call_then_proceeds(self):
         lock = os.path.join(self.locks, "1-a.json")
         json.dump({"model": "qwen", "pid": os.getpid()}, open(lock, "w"))
@@ -99,7 +117,7 @@ class BeginTests(Base):
                 os.unlink(lock)          # the call finished
         gs.begin("promptforge", sleep=sleeper)
         self.assertGreaterEqual(seen["n"], 2)
-        self.assertEqual(self.calls[0][0], "evict")   # eviction only after the call drained
+        self.assertEqual(self.calls[1][0], "evict")   # (the keeper starts first) eviction only after the call drained
 
     def test_stale_or_dead_pid_locks_do_not_block(self):
         old = os.path.join(self.locks, "old.json")

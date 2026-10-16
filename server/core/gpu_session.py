@@ -208,6 +208,12 @@ def begin(owner, set_step=None, sleep=time.sleep, now=time.time):
         _session = {"owners": [owner], "started": now(), "started_iso": started_iso, "last_activity": now(),
                     "max_s": SESSION_MAX_S, "idle_s": SESSION_IDLE_S}
 
+    # The keeper must be running BEFORE the slow part of begin(), not after it. Everything below can take minutes (up to
+    # LOCK_WAIT_S for an in-flight pipeline call, the eviction, a cold ComfyUI start of 2-5 min), and the pipeline treats a
+    # lease whose refreshedAt is older than its 90 s TTL as NOT held: a model call that starts then is not refused and
+    # reloads the 19 GB model onto the card we are clearing (seen live 2026-10-16: the lease went stale at the end of
+    # the 90 s wait, the task's very next call loaded the 27B, and ComfyUI got 3.8 GB: 430 s per image instead of ~45 s).
+    _ensure_keeper()
     try:
         step("pipeline yielding…")
         deadline = now() + LOCK_WAIT_S
@@ -230,7 +236,6 @@ def begin(owner, set_step=None, sleep=time.sleep, now=time.time):
     except Exception:
         end("begin-failed", stop_comfy=False)
         raise
-    _ensure_keeper()
     return {"started_session": True, "evicted": names, "comfy_started": comfy_started}
 
 
