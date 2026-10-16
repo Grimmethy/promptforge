@@ -669,6 +669,51 @@ def api_repair():
     return jsonify({"job_id": jid, "seed": j["seed"], "model": j["model"]})
 
 
+@app.route("/api/regenerate", methods=["POST"])
+def api_regenerate():
+    """Redraw a whole character using the picture as the reference. multipart: image (PNG; transparency is
+    flattened onto grey), prompt, negative, denoise (0.3-1.0, default 0.65), pose (1 = hold the pose with the
+    openpose ControlNet, default 1), seed, model, steps, cfg. Returns {job_id}; poll /api/job/<id>, then GET
+    /api/regenerate/<id>/result.png."""
+    from PIL import Image
+    from core import repair
+    f = request.files.get("image")
+    prompt = (request.form.get("prompt") or "").strip()
+    if not f or not prompt:
+        return jsonify({"error": "image and prompt are required"}), 400
+    try:
+        img = Image.open(f.stream).convert("RGBA")
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": f"bad image: {exc}"}), 400
+    img_png, _, size = repair.prepare(img, Image.new("L", img.size, 0))
+    j = dict(_DEFAULTS)
+    j.update(
+        positive=prompt, negative=(request.form.get("negative") or "").strip(),
+        denoise=min(1.0, max(0.3, float(request.form.get("denoise") or 0.65))),
+        pose=request.form.get("pose", "1") not in ("0", "false", ""),
+        seed=int(request.form.get("seed") or -1), steps=int(request.form.get("steps") or 28),
+        cfg=float(request.form.get("cfg") or 5.0), width=size[0], height=size[1], n_chars=1,
+        model=request.form.get("model") or (list_checkpoints() or ["novaFurryXL_ilV140.safetensors"])[0],
+        repair_image_png=img_png, spec={"regenerate": True, "prompt": prompt},
+        prompt_used={"positive": prompt, "negative": ""})
+    try:
+        jid = comfy.start(j, GALLERY_DIR)
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"job_id": jid, "seed": j["seed"], "model": j["model"], "pose": j["pose"]})
+
+
+@app.route("/api/regenerate/<jid>/result.png")
+def api_regenerate_result(jid):
+    rec = comfy.get_job(jid)
+    if not rec:
+        return jsonify({"error": "unknown job"}), 404
+    if rec.get("status") != "done" or not rec.get("images"):
+        return jsonify({"error": "not finished", "status": rec.get("status")}), 409
+    with open(_safe_gallery_path(rec["images"][0]), "rb") as fh:
+        return Response(fh.read(), mimetype="image/png")
+
+
 @app.route("/api/repair/<jid>/result.png")
 def api_repair_result(jid):
     import io

@@ -38,6 +38,20 @@ class RepairTest(unittest.TestCase):
         self.assertEqual(g["11"]["inputs"]["denoise"], 0.6)
         self.assertEqual(g["11"]["inputs"]["latent_image"], ["24", 0])
 
+    def test_regenerate_graph_has_no_mask_and_uses_pose(self):
+        job = {"id": "abcdefgh", "model": "m", "positive": "p", "negative": "n", "image_name": "i.png",
+               "seed": 1, "steps": 20, "cfg": 5, "sampler": "euler", "scheduler": "normal", "denoise": 0.7,
+               "pose": True}
+        g = comfy.build_repair_graph(job)
+        self.assertNotIn("24", g)
+        self.assertEqual(g["11"]["inputs"]["latent_image"], ["23", 0])
+        self.assertEqual(g["11"]["inputs"]["positive"], ["42", 0])
+        self.assertEqual(g["30"]["inputs"]["image"], ["20", 0])
+        job["pose"] = False
+        g = comfy.build_repair_graph(job)
+        self.assertNotIn("42", g)
+        self.assertEqual(g["11"]["inputs"]["positive"], ["6", 0])
+
 
 if __name__ == "__main__":
     unittest.main()
