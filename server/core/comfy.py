@@ -243,27 +243,45 @@ def build_krea2_graph(job):
 
 
 def build_repair_graph(job):
-    """Inpaint: checkpoint -> VAE-encode the picture -> noise mask (white = repaint, grown a little) -> KSampler at
-    `denoise` -> decode -> save. `image_name`/`mask_name` are files already uploaded to ComfyUI."""
+    """Image-to-image from a picture already uploaded to ComfyUI (`image_name`).
+
+    With `mask_name` (white = repaint, grown a little) only that area is redone: an inpaint. Without it the whole
+    picture is regenerated at `denoise`, the sprite acting as the reference. With `pose` the picture's OpenPose
+    skeleton is extracted and fed to the openpose ControlNet, which holds the pose so denoise can go higher."""
     prefix = f"promptforge_repair_{job['id'][:8]}"
-    return {
+    g = {
         "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": job["model"]}},
         "50": {"class_type": "CLIPSetLastLayer", "inputs": {"stop_at_clip_layer": -2, "clip": ["1", 1]}},
         "6": {"class_type": "CLIPTextEncode", "inputs": {"text": job["positive"], "clip": ["50", 0]}},
         "7": {"class_type": "CLIPTextEncode", "inputs": {"text": job["negative"], "clip": ["50", 0]}},
         "20": {"class_type": "LoadImage", "inputs": {"image": job["image_name"]}},
-        "21": {"class_type": "LoadImageMask", "inputs": {"image": job["mask_name"], "channel": "red"}},
-        "22": {"class_type": "GrowMask", "inputs": {"mask": ["21", 0], "expand": int(job.get("grow", 6)),
-                                                      "tapered_corners": True}},
         "23": {"class_type": "VAEEncode", "inputs": {"pixels": ["20", 0], "vae": ["1", 2]}},
-        "24": {"class_type": "SetLatentNoiseMask", "inputs": {"samples": ["23", 0], "mask": ["22", 0]}},
-        "11": {"class_type": "KSampler", "inputs": {
-            "seed": int(job["seed"]), "steps": int(job["steps"]), "cfg": float(job["cfg"]),
-            "sampler_name": job["sampler"], "scheduler": job["scheduler"], "denoise": float(job["denoise"]),
-            "model": ["1", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["24", 0]}},
         "12": {"class_type": "VAEDecode", "inputs": {"samples": ["11", 0], "vae": ["1", 2]}},
         "13": {"class_type": "SaveImage", "inputs": {"filename_prefix": prefix, "images": ["12", 0]}},
     }
+    latent = ["23", 0]
+    if job.get("mask_name"):
+        g["21"] = {"class_type": "LoadImageMask", "inputs": {"image": job["mask_name"], "channel": "red"}}
+        g["22"] = {"class_type": "GrowMask", "inputs": {"mask": ["21", 0], "expand": int(job.get("grow", 6)),
+                                                          "tapered_corners": True}}
+        g["24"] = {"class_type": "SetLatentNoiseMask", "inputs": {"samples": ["23", 0], "mask": ["22", 0]}}
+        latent = ["24", 0]
+    pos, neg = ["6", 0], ["7", 0]
+    if job.get("pose"):
+        g["30"] = {"class_type": "OpenposePreprocessor", "inputs": {
+            "image": ["20", 0], "detect_hand": "enable", "detect_body": "enable", "detect_face": "enable",
+            "resolution": 1024, "scale_stick_for_xinsr_cn": "disable"}}
+        g["40"] = {"class_type": "ControlNetLoader", "inputs": {"control_net_name": CN_MODEL}}
+        g["42"] = {"class_type": "ControlNetApplyAdvanced", "inputs": {
+            "positive": pos, "negative": neg, "control_net": ["40", 0], "image": ["30", 0],
+            "strength": float(job.get("cn_strength", 0.8)), "start_percent": 0.0,
+            "end_percent": float(job.get("cn_end", 0.8))}}
+        pos, neg = ["42", 0], ["42", 1]
+    g["11"] = {"class_type": "KSampler", "inputs": {
+        "seed": int(job["seed"]), "steps": int(job["steps"]), "cfg": float(job["cfg"]),
+        "sampler_name": job["sampler"], "scheduler": job["scheduler"], "denoise": float(job["denoise"]),
+        "model": ["1", 0], "positive": pos, "negative": neg, "latent_image": latent}}
+    return g
 
 
 def build_graph(job):
@@ -372,7 +390,9 @@ def _run(job, rec, gallery_dir):
 
         if job.get("repair_image_png"):
             job["image_name"] = upload_image(job["repair_image_png"], f"promptforge_repair_{job['id'][:8]}.png")
-            job["mask_name"] = upload_image(job["repair_mask_png"], f"promptforge_repair_mask_{job['id'][:8]}.png")
+            if job.get("repair_mask_png"):
+                job["mask_name"] = upload_image(job["repair_mask_png"],
+                                                f"promptforge_repair_mask_{job['id'][:8]}.png")
 
         if job.get("skeleton_png"):
             name = upload_image(job["skeleton_png"], f"promptforge_pose_{job['id'][:8]}.png")
