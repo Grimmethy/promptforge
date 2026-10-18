@@ -11,6 +11,7 @@ other and clears the GPU, so the active family has the whole card and the machin
 | `comfyui-lease.json` (`~/.local/state/agent-manager/`) | the single shared flag. Present and fresh = Forge family holds the GPU |
 | PromptForge `server/core/gpu_session.py` | the Forge family's **GPU broker**. HTTP API below; every other Forge component uses it over HTTP (no shared code) |
 | Agent Manager lanes (`local-worker.sh`, `review-runner.sh`, `gpu-guard.js`) | already yield their ticks while the lease is fresh |
+| KaggleForge `server/gpu_lease.py` | reserves ONE card for an eval with an endpoint-scoped lease (`holder: "kaggleforge"`, `endpoints: [<that card's Ollama URL>]`); see below |
 | `scripts/launch.sh` (Agent Manager) | explicit pipeline start deletes the lease and calls `/api/gpu/yield`: the pipeline wins |
 | `gpu-guard.js` (Agent Manager, per tick) | with no lease and ComfyUI still up, calls `/api/gpu/yield` (branch `feat/forge-gpu-yield`, pending merge) |
 
@@ -39,6 +40,18 @@ The pipeline reloads its model by itself on its next tick once the lease is gone
 GPU or cold-starting ComfyUI (2-5 min) now **waits** for that start (up to `FORGE_START_WAIT_S`, default 600) instead of taking
 the "session already live" shortcut. Before this, four quick Regenerate presses all but the first failed their first upload with
 "Connection refused". If the starting job fails, the waiting ones fail with "the Forge GPU session did not start: ...".
+
+## The lease file: fields and the one-holder rule
+`{holder, family: "forge", owner, acquiredAt, refreshedAt, ...}`. Fresh = `refreshedAt` within 90 s and `acquiredAt` within 900 s
+(Agent Manager's `readFreshLease`; both writers renew both stamps every 20 s).
+
+- **`endpoints`** (optional, Agent Manager `3a1b58eb`): an array of Ollama URLs. Absent or empty = the whole pipeline yields (PromptForge's
+  leases). Present = only callers of those endpoints yield (drafts, reviewer votes, the lane-health probe); the other cards keep working.
+- **One holder at a time.** The file has room for one lease, so nobody writes over another holder's *fresh* lease. PromptForge refuses a
+  session (`begin` raises, a job fails with "the GPU is reserved by kaggleforge (KAG-...)") and will not start ComfyUI while a fresh
+  foreign lease exists, even on a card with room; it also never refreshes or deletes a lease it does not hold. A stale lease may be taken over.
+  KaggleForge likewise refuses to start while PromptForge's lease is fresh.
+- **Losing the lease is preemption.** The file vanishing (an explicit pipeline start) or another holder in it ends the session / eval.
 
 ## API (PromptForge `:7430`)
 `GET /api/gpu/status` · `POST /api/gpu/acquire {owner}` · `POST /api/gpu/heartbeat {owner}` ·

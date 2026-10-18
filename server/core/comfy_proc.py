@@ -20,6 +20,7 @@ Everything here is best-effort: a missing nvidia-smi, an unreachable Ollama, or 
 spawn failure degrades to "just try to start ComfyUI, no lease".
 """
 
+import calendar
 import json
 import logging
 import os
@@ -54,6 +55,10 @@ COMFY_LEASE_PATH = os.path.expanduser(
         "COMFY_LEASE_PATH", "~/.local/state/agent-manager/comfyui-lease.json"
     )
 )
+
+# Agent Manager's freshness rules for the lease (src/gpu-guard.js readFreshLease): refreshed within TTL, acquired within MAX.
+LEASE_TTL_S = int(os.environ.get("AGENT_MANAGER_COMFY_LEASE_TTL_S", "90"))
+LEASE_MAX_S = int(os.environ.get("AGENT_MANAGER_COMFY_LEASE_MAX_S", "900"))
 
 COMFY_START_TIMEOUT_S = int(os.environ.get("COMFY_START_TIMEOUT_S", "300"))
 # VRAM ComfyUI (SDXL + ControlNet) needs to be considered "fits".
@@ -321,8 +326,51 @@ def _now_iso():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
+def _lease_file():
+    try:
+        with open(COMFY_LEASE_PATH) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _iso_ts(s):
+    """Epoch seconds of an ISO-8601 UTC stamp ("...Z", with or without milliseconds), or None."""
+    try:
+        return calendar.timegm(time.strptime(s[:19], "%Y-%m-%dT%H:%M:%S"))
+    except (TypeError, ValueError):
+        return None
+
+
+def foreign_lease(now=None):
+    """The lease when another holder (a KaggleForge eval, ...) holds it fresh by Agent Manager's rules, else None.
+    The lease file has room for one holder: writing ours over it would end that holder's GPU reservation."""
+    data = _lease_file()
+    if not data or data.get("holder") == "promptforge":
+        return None
+    now = time.time() if now is None else now
+    refreshed, acquired = _iso_ts(data.get("refreshedAt")), _iso_ts(data.get("acquiredAt"))
+    if refreshed is None or acquired is None or now - refreshed > LEASE_TTL_S or now - acquired > LEASE_MAX_S:
+        return None
+    return data
+
+
+def foreign_lease_message(data):
+    where = ", ".join(data.get("endpoints") or []) or "every card"
+    return (f"the GPU is reserved by {data.get('holder') or 'another holder'} ({data.get('owner') or '?'}, {where}); "
+            "PromptForge will not take it until that reservation ends")
+
+
+def refuse_if_foreign():
+    data = foreign_lease()
+    if data:
+        raise ComfyUnavailable(foreign_lease_message(data))
+
+
 def lease_acquire(job_id):
-    """Write the shared lease file. Called only on the eviction path."""
+    """Write the shared lease file. Called only on the eviction path. Raises ComfyUnavailable while another holder's lease is fresh."""
+    refuse_if_foreign()
     try:
         os.makedirs(os.path.dirname(COMFY_LEASE_PATH), exist_ok=True)
         now = _now_iso()
@@ -343,11 +391,9 @@ def lease_acquire(job_id):
 
 def lease_refresh(job_id):
     """Rewrite refreshedAt, keep the original acquiredAt. No-op if the file is
-    gone (an explicit pipeline start stomped it)."""
-    try:
-        with open(COMFY_LEASE_PATH) as f:
-            data = json.load(f)
-    except (OSError, ValueError):
+    gone (an explicit pipeline start stomped it) or another holder wrote it."""
+    data = _lease_file()
+    if not data or data.get("holder") != "promptforge":
         return False
     data["refreshedAt"] = _now_iso()
     if job_id is not None:
@@ -361,6 +407,9 @@ def lease_refresh(job_id):
 
 
 def lease_release():
+    """Delete the lease, only if it is ours: another holder's lease is theirs to end."""
+    if not lease_held():
+        return
     try:
         os.unlink(COMFY_LEASE_PATH)
     except OSError:
@@ -396,6 +445,7 @@ def ensure_comfyui_ready(set_step=None, job_id=None):
 
     if comfy_up():
         return {"started": False, "lease_taken": False, "target_gpu": None, "evicted": []}
+    refuse_if_foreign()   # even with room to spare: the reservation holder (e.g. a vLLM eval) needs the card it reserved
 
     plan = plan_comfyui_placement()
     lease_taken = False
