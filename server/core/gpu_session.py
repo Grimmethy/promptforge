@@ -215,6 +215,9 @@ def begin(owner, set_step=None, sleep=time.sleep, now=time.time):
         else:
             if _session:   # lease was stomped since the last keeper tick: that session is over
                 _end_locked("pipeline-reclaimed", stop_comfy=True)
+            foreign = comfy_proc.foreign_lease()
+            if foreign:   # one holder at a time: never write over another holder's fresh lease (a KaggleForge eval)
+                raise SessionError(comfy_proc.foreign_lease_message(foreign))
             started_iso = _iso()
             write_lease(owner, keep_acquired=started_iso)
             # "ready" is set when the GPU is cleared AND ComfyUI is up. A second job that arrives while the first is still starting
