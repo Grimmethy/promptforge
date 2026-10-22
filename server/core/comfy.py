@@ -13,6 +13,7 @@ comfyui_controlnet_aux packs and `controlnet-openpose-sdxl-1.0.safetensors`.
 
 import io
 import json
+import logging
 import os
 import random
 import re
@@ -24,6 +25,8 @@ import urllib.request
 import uuid
 
 from . import comfy_proc, gpu_session
+
+logger = logging.getLogger(__name__)
 
 COMFY_URL = os.environ.get("COMFY_URL", "http://127.0.0.1:8188").rstrip("/")
 CN_MODEL = os.environ.get("PROMPTFORGE_CN_MODEL", "controlnet-openpose-sdxl-1.0.safetensors")
@@ -438,7 +441,8 @@ def _run(job, rec, gallery_dir):
                         from . import thumbs
                         thumbs.ensure_thumb(gallery_dir, rel)
                     except Exception:  # noqa: BLE001
-                        pass
+                        logger.warning("job %s: thumbnail generation failed for %s",
+                                      job["id"], rel, exc_info=True)
             if saved:
                 sidecar = {"id": job["id"], "seed": job["seed"],
                            "model": job["model"], "spec": job.get("spec"),
