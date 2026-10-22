@@ -137,3 +137,26 @@ Inside the existing `catch (err)` block, add a single `console.warn('[state-gath
 
 Benefits:
 Any future regression in `editor.getRigs()` or the downstream call becomes immediately visible in the browser console during local development and in any log-forwarding setup the team already has, turning an invisible silent failure into a one-line diagnostic. The cost is a single `console.warn` that fires only on the exceptional path, so the happy path is unchanged and there is no performance or noise impact. It also preserves the intended "best-effort, don't crash the UI" behavior while giving the next engineer a concrete starting point instead of a blank stare at a `null` value.
+
+### AC-7 · Silent catch in loadGallery swallows load failures
+Strength: Strong
+Files: web/app.js
+Snippet:
+```
+async function loadGallery(reset = true) {
+  if (_galLoading) return;
+  const g = $('#gallery');
+  if (reset) {
+    _galOffset = 0; _galTotal = 0;
+    g.innerHTML = '';
+    g.append(..._skelTiles(12));   // placeholders while page 1 loads
+```
+
+Problem:
+`loadGallery` is an async function that resets gallery state, clears the DOM, appends skeleton tiles, and then (past the visible truncation) fetches and renders real tiles. The scanner confirmed an empty `catch` block at line 754 inside this function. Because the catch body contains no statement at all, any rejection from the fetch, a DOM error during tile insertion, or an exception in the pagination logic is absorbed silently: no `console.error` or `console.warn` call is made, no rethrow propagates to a caller, and the user is left staring at the skeleton placeholders (or a half-rendered grid) with zero diagnostic trail. In a project whose only logging primitive is `console.error`/`console.warn`, an empty catch is a complete observability dead-end.
+
+Solution:
+Replace the empty catch body with a single `console.error('loadGallery failed:', err);` call that captures the rejection reason, followed by `throw err;` so that any upstream `.catch` handler, `await`-ing caller, or top-level unhandled-rejection hook still receives the failure. This uses only the `console.error` primitive already present in the codebase, adds no dependency, and keeps the function's async contract intact (callers that `await loadGallery()` will see the rejection rather than a silent resolve).
+
+Benefits:
+Developers and operators now see a timestamped, context-labelled error in the browser console or Node stderr the moment a gallery load fails, eliminating the "blank gallery, no clue" debugging cycle. Rethrowing preserves the promise chain so any retry logic, error-boundary, or user-facing toast that keys off a rejected promise will actually fire. The fix is a two-line change scoped to one catch block, with no API or dependency surface added.
