@@ -376,12 +376,16 @@ def _gpu_errors():
     return (comfy_proc.ComfyUnavailable, gpu_session.SessionError, gpu_client.BrokerError)
 
 
-def _take_gpu(rec):
-    """Claim the GPU for a job. With GPU_BROKER_URL set the standalone broker runs the session (and PromptForge keeps it alive while the job runs);
-    otherwise the session runs in-process, exactly as before."""
+def _take_gpu(rec, job=None):
+    """Claim the GPU for a job. With GPU_BROKER_URL set the standalone broker runs the session (and PromptForge keeps it alive while the job runs),
+    on the job's `card` when it names one (the broker's default card otherwise); otherwise the session runs in-process, exactly as before."""
     on_step = lambda s: _set(rec, comfy_step=s)   # noqa: E731
     if gpu_client.enabled():
-        gpu_client.acquire("promptforge", on_step=on_step)
+        card = (job or {}).get("card")
+        if card:
+            gpu_client.acquire("promptforge", on_step=on_step, card=card)
+        else:
+            gpu_client.acquire("promptforge", on_step=on_step)
         gpu_client.job_started("promptforge")
     else:
         gpu_session.begin("promptforge", set_step=on_step)
@@ -417,7 +421,7 @@ def _run(job, rec, gallery_dir):
         try:
             # Forge family takes the whole GPU: pipeline model evicted, session lease kept fresh by
             # gpu_session's keeper (see gpu_session.py). Idle sessions end and stop ComfyUI.
-            _take_gpu(rec)
+            _take_gpu(rec, job)
             gpu_held = True
         except _gpu_errors() as exc:
             _set(rec, status="error", error=str(exc))

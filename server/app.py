@@ -145,6 +145,14 @@ def gpu_status():
     return jsonify(gpu_session.status())
 
 
+@app.route("/api/gpu/cards")
+def gpu_cards():
+    """The GPU cards the broker knows and who holds each, for a card picker. Only a broker knows cards: in-process PromptForge has the one local GPU."""
+    if gpu_client.enabled():
+        return _gpu_forward("GET", "/api/gpu/cards")
+    return jsonify({"cards": [], "broker": False})
+
+
 @app.route("/api/gpu/acquire", methods=["POST"])
 def gpu_acquire():
     if gpu_client.enabled():
@@ -638,6 +646,8 @@ def generate():
     spec = request.get_json(force=True, silent=True) or {}
     try:
         job = resolve_job(spec)
+        if spec.get("card"):
+            job["card"] = str(spec["card"]).strip()[:40]   # the broker card this job runs on (GET /api/gpu/cards); absent = the broker's default
         jid = comfy.start(job, GALLERY_DIR)
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": str(exc)}), 400

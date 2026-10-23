@@ -46,6 +46,8 @@ class FakeBroker:
 
             def do_GET(self):
                 broker.requests.append(("GET", self.path, None))
+                if self.path == "/api/gpu/cards":
+                    return self._reply(200, {"cards": [{"id": "3090", "held_by": None}]})
                 steps = {"promptforge": broker.current_step} if broker.current_step else {}
                 self._reply(200, {"active": False, "acquire_steps": steps})
 
@@ -133,6 +135,16 @@ class ClientTest(unittest.TestCase):
     def test_acquire_posts_the_owner_and_returns_the_payload(self):
         self.assertEqual(gpu_client.acquire("promptforge"), {"started_session": True, "evicted": []})
         self.assertEqual(self.broker.requests, [("POST", "/api/gpu/acquire", {"owner": "promptforge"})])
+
+    def test_acquire_names_the_card_only_when_given_one(self):
+        gpu_client.acquire("promptforge", card="3090")
+        gpu_client.acquire("promptforge", card="")
+        self.assertEqual(self.broker.requests, [("POST", "/api/gpu/acquire", {"owner": "promptforge", "card": "3090"}),
+                                                ("POST", "/api/gpu/acquire", {"owner": "promptforge"})])
+
+    def test_cards_returns_the_brokers_card_list(self):
+        self.assertEqual(gpu_client.cards(), {"cards": [{"id": "3090", "held_by": None}]})
+        self.assertEqual(self.broker.requests, [("GET", "/api/gpu/cards", None)])
 
     def test_a_refusal_raises_with_the_brokers_reason_and_status(self):
         self.broker.acquire_answer = (503, {"error": "the GPU is reserved by kaggleforge"})
