@@ -45,8 +45,11 @@ the "session already live" shortcut. Before this, four quick Regenerate presses 
 `{holder, family: "forge", owner, acquiredAt, refreshedAt, ...}`. Fresh = `refreshedAt` within 90 s and `acquiredAt` within 900 s
 (Agent Manager's `readFreshLease`; both writers renew both stamps every 20 s).
 
-- **`endpoints`** (optional, Agent Manager `3a1b58eb`): an array of Ollama URLs. Absent or empty = the whole pipeline yields (PromptForge's
-  leases). Present = only callers of those endpoints yield (drafts, reviewer votes, the lane-health probe); the other cards keep working.
+- **`endpoints`** (optional, Agent Manager `3a1b58eb`): an array of Ollama URLs. Absent or empty = the whole pipeline yields. Present = only
+  callers of those endpoints yield (drafts, reviewer votes, the lane-health probe); the other cards keep working. PromptForge's lease is
+  scoped to `FORGE_LEASE_ENDPOINTS` (default: the Ollama it evicts from, `OLLAMA_URL`, i.e. the card ComfyUI takes), so a Forge render no
+  longer pauses lanes on other cards. `FORGE_LEASE_ENDPOINTS=all` restores the old unscoped lease. Extra URLs in the list pause their lanes
+  but nothing is evicted from them: eviction still clears only `OLLAMA_URL`.
 - **One holder at a time.** The file has room for one lease, so nobody writes over another holder's *fresh* lease. PromptForge refuses a
   session (`begin` raises, a job fails with "the GPU is reserved by kaggleforge (KAG-...)") and will not start ComfyUI while a fresh
   foreign lease exists, even on a card with room; it also never refreshes or deletes a lease it does not hold. A stale lease may be taken over.
@@ -66,7 +69,7 @@ the "session already live" shortcut. Before this, four quick Regenerate presses 
 
 ## Tunables (env, PromptForge)
 `FORGE_SESSION_IDLE_S` (1200) · `FORGE_SESSION_MAX_S` (14400) · `FORGE_KEEPER_TICK_S` (20) ·
-`FORGE_LOCK_WAIT_S` (90) · `FORGE_EVICT_WAIT_S` (45) · `FORGE_START_WAIT_S` (600) · `AGENT_MANAGER_MODEL_LOCKS_DIR`.
+`FORGE_LOCK_WAIT_S` (90) · `FORGE_EVICT_WAIT_S` (45) · `FORGE_START_WAIT_S` (600) · `FORGE_LEASE_ENDPOINTS` (default `OLLAMA_URL`; `all` = unscoped) · `AGENT_MANAGER_MODEL_LOCKS_DIR`.
 
 ## Known edges
 - Evicting while a pipeline call is mid-flight is avoided by step 2; a call that starts in the same instant fails

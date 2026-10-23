@@ -368,22 +368,41 @@ def refuse_if_foreign():
         raise ComfyUnavailable(foreign_lease_message(data))
 
 
+def lease_endpoints(environ=None):
+    """The Ollama URLs a lease written by PromptForge covers, so only the pipeline lanes on those cards yield.
+
+    FORGE_LEASE_ENDPOINTS (comma-separated URLs) wins; the single word `all` means unscoped (every lane yields, the behaviour before
+    2026-10-22). Unset: the Ollama this module evicts from (OLLAMA_URL), because that is the card ComfyUI is about to take. Extra URLs
+    pause their lanes but nothing is evicted from them. Agent Manager reads the list as `endpoints` (src/gpu-guard.js leaseHeldFor)."""
+    env = os.environ if environ is None else environ
+    raw = (env.get("FORGE_LEASE_ENDPOINTS") or "").strip()
+    if raw.lower() == "all":
+        return []
+    urls = [u.strip() for u in raw.split(",") if u.strip()] if raw else [OLLAMA_URL]
+    return urls
+
+
+def lease_scope(environ=None):
+    """{"endpoints": [...]} for a lease dict, or {} when the lease is unscoped (the key is omitted, as the pipeline expects)."""
+    urls = lease_endpoints(environ)
+    return {"endpoints": urls} if urls else {}
+
+
 def lease_acquire(job_id):
     """Write the shared lease file. Called only on the eviction path. Raises ComfyUnavailable while another holder's lease is fresh."""
     refuse_if_foreign()
     try:
         os.makedirs(os.path.dirname(COMFY_LEASE_PATH), exist_ok=True)
         now = _now_iso()
+        data = {
+            "holder": "promptforge",
+            "acquiredAt": now,
+            "refreshedAt": now,
+            "jobId": job_id,
+        }
+        data.update(lease_scope())
         with open(COMFY_LEASE_PATH, "w") as f:
-            json.dump(
-                {
-                    "holder": "promptforge",
-                    "acquiredAt": now,
-                    "refreshedAt": now,
-                    "jobId": job_id,
-                },
-                f,
-            )
+            json.dump(data, f)
         return True
     except OSError:
         return False
