@@ -38,3 +38,32 @@ Add one or two public accessors in `data` (e.g., `data.load_theme_yaml(path)` an
 
 Benefits:
 `themes.py` can be tested by injecting a stub for the public accessor, without mocking private methods or file I/O internals. A change to the YAML schema or overlay format is contained to `data`'s loader functions, and `themes.py` sees a stable public signature. The dependency graph gains one explicit public entry point where previously there was an implicit private one, making the contract visible to readers and linters.
+
+### AC-4 · Add scene_contribution accessor to themes.py
+Strength: Strong
+Split-Depth: 1
+Files: themes.py
+
+Problem:
+The set of 'always-applied' theme keys (palette, lighting) is currently known only to callers, who must manually extract those specific keys from the result of themes.resolve and join them into a string. Adding a new always-applied key in the future requires finding and updating every call site that performs this extraction, because the canonical list is not encoded anywhere in the theme module itself.
+
+Solution:
+Add a public function `scene_contribution(resolved) -> str` (or a method on the resolved object if `resolve` returns a class/dataclass rather than a plain dict) that: (1) reads the canonical always-applied keys from the resolved theme, (2) filters out any that are None or empty, (3) returns the remaining values joined with a single space. Add a docstring stating this function is the single source of truth for which keys are always-applied and that adding a new always-applied key requires updating only this function. The function must return an empty string when the input is None or absent. Do not alter the return type or structure of `resolve` itself; this accessor is purely additive.
+
+Benefits:
+The 'which keys to apply' knowledge is encapsulated in one function. Adding a new always-applied key becomes a one-line change inside `scene_contribution`; no caller code changes are needed. Callers can pass the raw resolved theme object without knowing its internal key layout.
+
+### AC-5 · Change assemble to obtain scene text via themes.scene_contribution
+Strength: Strong
+Split-Depth: 1
+Files: server/core/assemble.py
+Depends-On: AC-4
+
+Problem:
+The `assemble` function currently reads `spec.get("scene_tags")` and expects the caller to have already extracted the always-applied theme keys and joined them into a string. This forces every caller to know which keys are always-applied versus UI-suggestion-only, duplicating knowledge that belongs in the theme module. The docstring even documents the contract as 'scene_tags (already-resolved theme/setting/style/palette/lighting)', baking the join responsibility into the caller.
+
+Solution:
+Import the `scene_contribution` accessor from the themes module (candidate 0). In `assemble`, replace the direct read of `spec.get("scene_tags")` with a call to `themes.scene_contribution(spec.get("theme"))` (or the key name the callers actually use to pass the resolved theme — confirm by reading call sites). The accessor returns an empty string for None/absent input, preserving the existing null-handling where the scene chunk is simply omitted. Update the `assemble` docstring: replace 'scene_tags (already-resolved theme/setting/style/palette/lighting)' with 'theme (raw resolved theme object; assemble extracts the always-applied contribution internally)'. All other spec keys (pose_tags, position_tags, characters, quality, etc.) and the prompt-assembly logic remain untouched. Update any existing unit tests in the assemble test module that construct a `scene_tags` string by hand so they pass the raw resolved theme dict instead and assert the same final positive/negative output.
+
+Benefits:
+Callers pass the raw resolved theme object without knowing which keys are always-applied. The join logic and the canonical key list live in exactly one place (themes.scene_contribution). A future addition of a new always-applied key requires zero changes to assemble.py or its callers.
