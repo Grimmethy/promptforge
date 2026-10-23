@@ -45,3 +45,26 @@ Replace the sequential loop with a `ThreadPoolExecutor` configured with 5 worker
 
 Benefits:
 The total execution time reduces from O(n) to O(n/k) where k=5, meaning that for 100 models, the time becomes roughly 1/5th of the original. This is a meaningful improvement for large model lists, and it’s implementable with existing primitives — no new libraries or logging/metrics infrastructure needed. The fix is safe, deterministic, and matches the project’s constraints.
+
+### AC-3 · Avoid JSON round-trip for deep cloning
+Strength: Strong
+Files: tests/test_gpu_session.py
+Snippet:
+```
+        self.assertIsNone(gs.status()["session"])
+        gs._session = {"owners": ["x"], "started": time.time(), "started_iso": gs._iso(), "last_activity": time.time(),
+                       "max_s": 99999, "idle_s": 99999, "ready": threading.Event(), "failed": None}
+        starting = json.loads(json.dumps(gs.status()))
+        self.assertIs(starting["session"]["ready"], False)
+        gs._session["ready"].set()
+        ready = json.loads(json.dumps(gs.status()))
+```
+
+Problem:  
+The test uses `json.loads(json.dumps(gs.status()))` to deep-clone a Python dict, triggering a full serialization and deserialization cycle each time. This is O(n) in object size, involves string allocations and parsing, and runs twice per test case — a negligible cost in tests but potentially costly in production if called repeatedly in hot paths.
+
+Solution:  
+Replace the JSON round-trip with `copy.deepcopy(gs.status())`. This is a built-in Python primitive, requires no new dependencies, and performs the same deep clone operation without the overhead of JSON serialization/deserialization.
+
+Benefits:  
+Eliminates the JSON round-trip cost entirely, making the operation faster and more predictable. Since the project has no metrics or logging to instrument this, the fix is safe, zero-cost to deploy, and aligns with the project’s existing primitives.
