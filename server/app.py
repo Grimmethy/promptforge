@@ -128,7 +128,7 @@ def comfy_status():
 
 # ------------------------------------------------------------ Forge GPU session (family exclusion)
 # One HTTP surface for every Forge component (VideoForge, scripts, ...) so they need no shared code.
-# Protocol: Docs/GPU_FAMILY_PROTOCOL.md. acquire = pipeline's model evicted + ComfyUI up; heartbeat while
+# Protocol: agent-manager-gpu-broker Docs/GPU_FAMILY_PROTOCOL.md (PromptForge Docs/GPU_FAMILY_PROTOCOL.md is a pointer). acquire = pipeline's model evicted + ComfyUI up; heartbeat while
 # working; release = lease dropped and ComfyUI stopped; yield = the pipeline asking for the card back.
 
 def _gpu_forward(method, path):

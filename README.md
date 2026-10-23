@@ -41,7 +41,7 @@ explicit `bash scripts/launch.sh` on the agent-manager side).
 | `COMFY_START_TIMEOUT_S` | `300` | how long to wait for `/system_stats` after spawn |
 | `COMFY_REQUIRED_VRAM_MB` | `9000` | VRAM ComfyUI needs to be considered "fits" |
 | `COMFY_CUDA_DEVICE` | `0` | ComfyUI's target GPU index; another GPU with room is preferred over evicting |
-| `GPU_BROKER_URL` | unset | set (e.g. `http://localhost:7449`) to take the GPU from the standalone GPU broker instead of running the session in-process; `/api/gpu/*` then proxy to it. See `Docs/GPU_FAMILY_PROTOCOL.md`, Broker mode |
+| `GPU_BROKER_URL` | unset | set (e.g. `http://localhost:7449`) to take the GPU from the standalone GPU broker instead of running the session in-process; `/api/gpu/*` then proxy to it. The protocol is in the broker repo (`agent-manager-gpu-broker`, `Docs/GPU_FAMILY_PROTOCOL.md`); `Docs/GPU_FAMILY_PROTOCOL.md` here is a pointer |
 | `FORGE_BROKER_STEP_POLL_S` | `1.0` | broker mode: how often a blocked acquire polls the broker for its progress step |
 | `FORGE_BROKER_HEARTBEAT_S` | `60` | broker mode: heartbeat interval while a job runs |
 | `FORGE_BROKER_ACQUIRE_TIMEOUT_S` | `900` | broker mode: how long one acquire may block |

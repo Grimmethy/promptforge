@@ -2,7 +2,7 @@
 
 PromptForge used to run the Forge GPU session in-process (gpu_session.py). With GPU_BROKER_URL set (for example http://localhost:7449) it asks the
 broker instead and runs no session of its own; with it unset nothing here is used and PromptForge behaves exactly as before. The broker serves the same
-five /api/gpu routes (docs/GPU_FAMILY_PROTOCOL.md) and adds `acquire_steps` to the status: the latest progress text of each acquire still running.
+five /api/gpu routes (agent-manager-gpu-broker Docs/GPU_FAMILY_PROTOCOL.md) and adds `acquire_steps` to the status: the latest progress text of each acquire still running.
 
 Standard library only. Every call returns the broker's HTTP status together with its JSON, so a 409 from heartbeat ("no session, the pipeline took
 the GPU back") is an answer, not an error; BrokerError means the broker could not be reached, or refused an acquire.
