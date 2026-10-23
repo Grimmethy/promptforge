@@ -58,6 +58,20 @@ class TakeGpuTest(SafeCase):
         self.assertTrue(callable(acquire.call_args.kwargs["on_step"]))
         self.assertEqual(rec["comfy_step"], "starting ComfyUI…")          # the broker's progress reaches the job record
 
+    def test_a_job_card_is_passed_to_the_broker_and_no_card_keeps_the_old_call_shape(self):
+        with broker_mode(True), mock.patch.object(gpu_client, "acquire") as ac, mock.patch.object(gpu_client, "job_started"):
+            comfy._take_gpu({}, {"card": "3090"})
+            self.assertEqual(ac.call_args.kwargs["card"], "3090")
+            comfy._take_gpu({}, {})
+            comfy._take_gpu({})
+        self.assertNotIn("card", ac.call_args_list[1].kwargs)
+        self.assertNotIn("card", ac.call_args_list[2].kwargs)
+
+    def test_in_process_mode_ignores_the_job_card(self):
+        with broker_mode(False), mock.patch.object(gpu_session, "begin") as begin:
+            comfy._take_gpu({}, {"card": "3090"})
+        self.assertNotIn("card", begin.call_args.kwargs)
+
     def test_in_process_mode_begins_a_local_session_with_the_same_progress_hook(self):
         rec = {}
         with broker_mode(False), mock.patch.object(gpu_client, "acquire") as acquire, \
@@ -158,8 +172,9 @@ class RunWiringTest(SafeCase):
         rec = {}
         with mock.patch.object(comfy, "_take_gpu") as take, mock.patch.object(comfy, "_gpu_job_done") as done, \
                 mock.patch.object(comfy, "_gpu_reclaimed", return_value=False):
-            comfy._run({"id": "job-2"}, rec, "/nonexistent")     # no graph inputs: the job fails right after the claim
-        take.assert_called_once_with(rec)
+            job = {"id": "job-2"}
+            comfy._run(job, rec, "/nonexistent")     # no graph inputs: the job fails right after the claim
+        take.assert_called_once_with(rec, job)
         self.assertEqual(rec["status"], "error")
         done.assert_called_once_with(True)
 
@@ -213,3 +228,36 @@ class RouteTest(SafeCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CardsRouteTest(SafeCase):
+    def setUp(self):
+        super().setUp()
+        self.client = pf_app.app.test_client()
+
+    def test_broker_mode_proxies_the_card_list(self):
+        with broker_mode(True), mock.patch.object(gpu_client, "forward", return_value=(200, {"cards": [{"id": "3090"}]})) as forward:
+            r = self.client.get("/api/gpu/cards")
+        self.assertEqual((r.status_code, r.get_json()), (200, {"cards": [{"id": "3090"}]}))
+        forward.assert_called_once_with("GET", "/api/gpu/cards", None)
+
+    def test_in_process_mode_has_no_cards(self):
+        with broker_mode(False), mock.patch.object(gpu_client, "forward") as forward:
+            r = self.client.get("/api/gpu/cards")
+        self.assertEqual(r.get_json(), {"cards": [], "broker": False})
+        forward.assert_not_called()
+
+    def test_generate_puts_the_requested_card_on_the_job(self):
+        seen = {}
+
+        def fake_start(job, gallery):
+            seen.update(job)
+            return "j1"
+
+        job = {"prompt_used": "p", "seed": 1}
+        with mock.patch.object(pf_app, "resolve_job", side_effect=lambda spec: dict(job)), mock.patch.object(comfy, "start", side_effect=fake_start):
+            self.client.post("/api/generate", json={"card": " rx3090 "})
+            self.assertEqual(seen["card"], "rx3090")
+            seen.clear()
+            self.client.post("/api/generate", json={})
+        self.assertNotIn("card", seen)

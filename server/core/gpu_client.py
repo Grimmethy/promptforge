@@ -71,14 +71,15 @@ def _poll_steps(owner, on_step, stop):
                 pass
 
 
-def acquire(owner, on_step=None):
+def acquire(owner, on_step=None, card=None):
     """Take the GPU for the Forge family. Blocks until the pipeline's model is gone and ComfyUI answers (minutes on a cold start);
-    on_step(text) is called with each new progress step meanwhile. Raises BrokerError with the broker's reason when it refuses."""
+    on_step(text) is called with each new progress step meanwhile. `card` names the broker card (GET /api/gpu/cards) to take; left out, the broker
+    uses its default card. Raises BrokerError with the broker's reason when it refuses."""
     stop = threading.Event()
     if on_step:
         threading.Thread(target=_poll_steps, args=(owner, on_step, stop), daemon=True, name="gpu-broker-steps").start()
     try:
-        status, payload = _call("POST", "/api/gpu/acquire", {"owner": owner}, timeout=ACQUIRE_TIMEOUT_S)
+        status, payload = _call("POST", "/api/gpu/acquire", {"owner": owner, **({"card": card} if card else {})}, timeout=ACQUIRE_TIMEOUT_S)
     finally:
         stop.set()
     if status != 200:
@@ -111,6 +112,11 @@ def yield_to_pipeline():
 
 def status():
     return _call("GET", "/api/gpu/status", timeout=15)[1]
+
+
+def cards():
+    """The broker's cards with who holds each (GET /api/gpu/cards); a BrokerError when the broker cannot be reached."""
+    return _call("GET", "/api/gpu/cards", timeout=15)[1]
 
 
 # ------------------------------------------------------------------- job hold
