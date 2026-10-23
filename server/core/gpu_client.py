@@ -92,6 +92,15 @@ def heartbeat(owner):
     return status == 200
 
 
+def forward(method, path, body=None):
+    """(http_status, json) of the broker's answer to the same request. PromptForge's own /api/gpu routes use it when it is a broker client, so they
+    proxy to the broker and PromptForge never runs a second session. An unreachable broker is a 503 carrying the reason."""
+    try:
+        return _call(method, path, body, timeout=ACQUIRE_TIMEOUT_S if path.endswith("/acquire") else 60)
+    except BrokerError as exc:
+        return 503, {"error": str(exc)}
+
+
 def release():
     return _call("POST", "/api/gpu/release", {}, timeout=60)[1]
 
