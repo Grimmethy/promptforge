@@ -9,7 +9,8 @@ other and clears the GPU, so the active family has the whole card and the machin
 | Piece | Role |
 |---|---|
 | `comfyui-lease.json` (`~/.local/state/agent-manager/`) | the single shared flag. Present and fresh = Forge family holds the GPU |
-| PromptForge `server/core/gpu_session.py` | the Forge family's **GPU broker**. HTTP API below; every other Forge component uses it over HTTP (no shared code) |
+| PromptForge `server/core/gpu_session.py` | the Forge family's in-process **GPU session**, used when `GPU_BROKER_URL` is unset (the default). HTTP API below; every other Forge component uses it over HTTP (no shared code) |
+| `agent-manager-gpu-broker` (`:7449`) | the same session core and the same five routes as a standalone service, plus `acquire_steps` in its status. PromptForge can be its client (`GPU_BROKER_URL`, see Broker mode) |
 | Agent Manager lanes (`local-worker.sh`, `review-runner.sh`, `gpu-guard.js`) | already yield their ticks while the lease is fresh |
 | KaggleForge `server/gpu_lease.py` | reserves ONE card for an eval with an endpoint-scoped lease (`holder: "kaggleforge"`, `endpoints: [<that card's Ollama URL>]`); see below |
 | `scripts/launch.sh` (Agent Manager) | explicit pipeline start deletes the lease and calls `/api/gpu/yield`: the pipeline wins |
@@ -60,6 +61,15 @@ the "session already live" shortcut. Before this, four quick Regenerate presses 
 `GET /api/gpu/status` · `POST /api/gpu/acquire {owner}` · `POST /api/gpu/heartbeat {owner}` ·
 `POST /api/gpu/release` · `POST /api/gpu/yield`
 
+## Broker mode (`GPU_BROKER_URL`)
+**Unset (the default): everything is in-process, exactly as described above.** Set (for example `http://localhost:7449`): PromptForge runs no session of its own.
+- A job **acquires** from the broker. The broker's progress steps ("clearing the pipeline's model from the GPU…", "starting ComfyUI…") reach the job through `acquire_steps` in the broker's `GET /api/gpu/status`, which PromptForge polls (`FORGE_BROKER_STEP_POLL_S`) while the acquire blocks.
+- While a job runs a thread sends a **heartbeat** every `FORGE_BROKER_HEARTBEAT_S` (the broker cannot see PromptForge's jobs and ends a session that was idle for `FORGE_SESSION_IDLE_S`). A heartbeat the broker answers with 409 (no session) means the pipeline took the GPU back: the job reports a reclaimed GPU.
+- A refused acquire (503, for example "the GPU is reserved by kaggleforge") is the job's error text. An unreachable broker is "the GPU broker is not reachable at <url>".
+- PromptForge's own `/api/gpu/*` routes **proxy to the broker**, so a client still pointed at `:7430` shares the one session. There is never a second session.
+- **The broker and an in-process PromptForge session must never both run against the same lease file.** The cutover is: start the broker (`POST /api/plugins/gpu-broker/ensure-started` on the agent-manager dashboard), add `GPU_BROKER_URL` to the `promptforge` entry's `process.env` in `plugins.json`, restart PromptForge. Rollback: remove it and restart.
+- `POST /api/comfy/start` is still sessionless in both modes (it starts ComfyUI outside any session).
+
 ## What each Forge component must do
 - **Anything that generates through PromptForge** (CharacterForge, StoryForge, SceneForge): nothing. A PromptForge
   job begins a session automatically.
@@ -70,6 +80,7 @@ the "session already live" shortcut. Before this, four quick Regenerate presses 
 ## Tunables (env, PromptForge)
 `FORGE_SESSION_IDLE_S` (1200) · `FORGE_SESSION_MAX_S` (14400) · `FORGE_KEEPER_TICK_S` (20) ·
 `FORGE_LOCK_WAIT_S` (90) · `FORGE_EVICT_WAIT_S` (45) · `FORGE_START_WAIT_S` (600) · `FORGE_LEASE_ENDPOINTS` (default `OLLAMA_URL`; `all` = unscoped) · `AGENT_MANAGER_MODEL_LOCKS_DIR`.
+Broker mode: `GPU_BROKER_URL` (unset = in-process) · `FORGE_BROKER_STEP_POLL_S` (1.0) · `FORGE_BROKER_HEARTBEAT_S` (60) · `FORGE_BROKER_ACQUIRE_TIMEOUT_S` (900).
 
 ## Known edges
 - Evicting while a pipeline call is mid-flight is avoided by step 2; a call that starts in the same instant fails
