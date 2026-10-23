@@ -158,6 +158,7 @@ def write_lease(owner, job_id=None, keep_acquired=None):
     now = _iso()
     data = {"holder": "promptforge", "family": "forge", "owner": owner, "acquiredAt": now, "refreshedAt": now,
             "jobId": job_id, "sessionStartedAt": keep_acquired or now}
+    data.update(comfy_proc.lease_scope())   # card-scoped: only the pipeline lanes on these Ollama endpoints yield (empty = every lane)
     os.makedirs(os.path.dirname(comfy_proc.COMFY_LEASE_PATH), exist_ok=True)
     tmp = comfy_proc.COMFY_LEASE_PATH + ".tmp"
     with open(tmp, "w") as f:
