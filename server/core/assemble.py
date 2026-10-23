@@ -41,11 +41,8 @@ def character_segment(ch):
     outfit_kw = data.fill_outfit(
         data.outfit_fragment(ch.get("outfit") or {}), ch.get("colors") or {})
 
-    if src == "custom":
-        seg = data.normalize_kw(custom, outfit_kw, expr_kw)
-        return data.apply_weight(seg, weight), ""
-
-    if src == "secondbrain":
+    # "secondbrain" is architecturally identical to "custom"; split here if they ever diverge.
+    if src in ("custom", "secondbrain"):
         seg = data.normalize_kw(custom, outfit_kw, expr_kw)
         return data.apply_weight(seg, weight), ""
 
