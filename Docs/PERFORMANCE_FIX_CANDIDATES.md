@@ -68,3 +68,26 @@ Replace the JSON round-trip with `copy.deepcopy(gs.status())`. This is a built-i
 
 Benefits:  
 Eliminates the JSON round-trip cost entirely, making the operation faster and more predictable. Since the project has no metrics or logging to instrument this, the fix is safe, zero-cost to deploy, and aligns with the project’s existing primitives.
+
+### AC-4 · Replace inefficient JSON round-trip with deepcopy
+Strength: Strong
+Files: tests/test_gpu_session.py
+Snippet:
+```
+        starting = json.loads(json.dumps(gs.status()))
+        self.assertIs(starting["session"]["ready"], False)
+        gs._session["ready"].set()
+        ready = json.loads(json.dumps(gs.status()))
+        self.assertIs(ready["session"]["ready"], True)
+        self.assertTrue(ready["active"])
+
+```
+
+Problem:
+The test uses `json.loads(json.dumps(gs.status()))` to deep-clone a Python object, triggering a full serialization and deserialization cycle for every call. This is inefficient and unnecessary since `copy.deepcopy` is available, semantically equivalent for native Python types, and significantly faster. The pattern appears twice per test case, and while the test is not in a hot path, the antipattern is still bad and will scale poorly if reused elsewhere.
+
+Solution:
+Replace both instances of `json.loads(json.dumps(gs.status()))` with `copy.deepcopy(gs.status())`. This uses only the built-in `copy` module, matches the project’s existing Python logging/telemetry pattern (no metrics or logging changes needed), and is semantically equivalent — both produce a deep copy, but `copy.deepcopy` is faster and more reliable for Python native types.
+
+Benefits:
+The fix eliminates the O(n) serialization/deserialization overhead per call, reducing test runtime and avoiding potential bugs from JSON serialization quirks (e.g., non-serializable types, precision loss). The fix is trivial, safe, and matches the project’s existing tooling — no new dependencies or APIs required.
