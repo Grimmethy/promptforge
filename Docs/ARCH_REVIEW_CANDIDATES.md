@@ -67,3 +67,16 @@ Import the `scene_contribution` accessor from the themes module (candidate 0). I
 
 Benefits:
 Callers pass the raw resolved theme object without knowing which keys are always-applied. The join logic and the canonical key list live in exactly one place (themes.scene_contribution). A future addition of a new always-applied key requires zero changes to assemble.py or its callers.
+
+### AC-6 · Duplicated processing branch for custom and secondbrain sources in character_segment
+Strength: Strong
+Files: server/core/assemble.py
+
+Problem:
+In `character_segment`, the `"custom"` and `"secondbrain"` source branches execute an identical sequence: both call `data.normalize_kw` with the same keyword arguments and then `data.apply_weight` with the same weight, returning the result alongside an empty-string negative. The two branches differ only in the literal source string they match, yet the body is copy-pasted. Any future change to how these sources are normalized, weighted, or returned (for example, adding a second normalization pass or a conditional weight modifier) must be replicated in both places, creating a divergence risk that a single code path would eliminate.
+
+Solution:
+Replace the two separate `if src == "custom":` / `elif src == "secondbrain":` blocks with a single `if src in ("custom", "secondbrain"):` guard that executes the shared `normalize_kw` → `apply_weight` → return sequence exactly once. The surrounding logic (other source branches, the fallback) remains unchanged.
+
+Benefits:
+Removes the redundant branch, shrinks the function, and guarantees that custom and secondbrain sources stay in lockstep for any future modification. Reviewers and future contributors see one code path instead of two that must be kept in sync, reducing the chance of a silent behavioral split between the two source types.
