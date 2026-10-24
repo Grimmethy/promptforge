@@ -210,10 +210,12 @@ def plan_comfyui_placement(
 # ------------------------------------------------------------------- actions
 
 def evict_ollama_models(names):
-    """Ask Ollama to unload each model (keep_alive:0). Best-effort."""
-    for name in names:
+    """Ask Ollama to unload each model (keep_alive:0). Best-effort, concurrent."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _evict_one(name):
         if not name:
-            continue
+            return
         try:
             payload = json.dumps(
                 {"model": name, "keep_alive": 0, "prompt": ""}
@@ -228,6 +230,14 @@ def evict_ollama_models(names):
                 r.read()
         except Exception:
             pass
+
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        futures = [pool.submit(_evict_one, name) for name in names]
+        for f in futures:
+            try:
+                f.result()
+            except Exception:
+                pass
 
 
 def _write_pid(pid):
