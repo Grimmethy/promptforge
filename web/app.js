@@ -809,7 +809,7 @@ async function loadGallery(reset = true) {
   _galLoading = true;
   try {
     const r = await fetch(`/api/gallery?offset=${_galOffset}&limit=${_GAL_PAGE}`)
-      .then(r => r.json()).catch(() => ({ items: [], total: 0 }));
+      .then(r => r.json()).catch(err => { console.error('loadGallery fetch failed:', err); return { items: [], total: 0 }; });
     if (reset) g.innerHTML = '';
     const old = $('#gallerySentinel'); if (old) old.remove();
     (r.items || []).forEach(it => g.append(imgTile(it.file)));
