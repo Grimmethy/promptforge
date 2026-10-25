@@ -38,9 +38,13 @@ explicit `bash scripts/launch.sh` on the agent-manager side).
 | `COMFY_LAUNCH_CMD` | `bash /media/model-cache/github/TheAgent/app/tools/ComfyUI/launch-comfyui.sh` | detached launch command (the browserless inner script) |
 | `COMFY_LOG` | `~/.local/state/comfyui.log` | ComfyUI stdout/stderr is appended here; `/api/comfy/status` tails it |
 | `COMFY_PID_PATH` | `~/.local/state/promptforge/comfyui.pid` | pid of a ComfyUI PromptForge started (drives the Stop button) |
-| `COMFY_START_TIMEOUT_S` | `120` | how long to wait for `/system_stats` after spawn |
+| `COMFY_START_TIMEOUT_S` | `300` | how long to wait for `/system_stats` after spawn |
 | `COMFY_REQUIRED_VRAM_MB` | `9000` | VRAM ComfyUI needs to be considered "fits" |
 | `COMFY_CUDA_DEVICE` | `0` | ComfyUI's target GPU index; another GPU with room is preferred over evicting |
+| `GPU_BROKER_URL` | unset | set (e.g. `http://localhost:7449`) to take the GPU from the standalone GPU broker instead of running the session in-process; `/api/gpu/*` then proxy to it. The protocol is in the broker repo (`agent-manager-gpu-broker`, `Docs/GPU_FAMILY_PROTOCOL.md`); `Docs/GPU_FAMILY_PROTOCOL.md` here is a pointer |
+| `FORGE_BROKER_STEP_POLL_S` | `1.0` | broker mode: how often a blocked acquire polls the broker for its progress step |
+| `FORGE_BROKER_HEARTBEAT_S` | `60` | broker mode: heartbeat interval while a job runs |
+| `FORGE_BROKER_ACQUIRE_TIMEOUT_S` | `900` | broker mode: how long one acquire may block |
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | queried for resident models (`/api/ps`) and eviction (`/api/generate` `keep_alive:0`) |
 | `COMFY_LEASE_PATH` | `~/.local/state/agent-manager/comfyui-lease.json` | shared lease file; must match agent-manager's `AGENT_MANAGER_COMFY_LEASE_PATH` |
 | `PROMPTFORGE_GALLERY_DIR` | `<checkout>/gallery` | where generated images live. Images are gitignored, so a second checkout/worktree must point this at the real gallery or it shows an empty grid |

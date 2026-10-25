@@ -22,3 +22,26 @@ Replace the `JSON.parse(JSON.stringify(r))` expression inside the `.map()` callb
 
 Benefits:
 Eliminates the two extra heap allocations (the serialized string and the re-parsed object graph) per rig element, shaving a few tens of nanoseconds off each getter call. Removes the silent data-loss edge cases around `undefined` properties, `Symbol` keys, and `Date` serialization so that future rig fields of those types are cloned faithfully without a second code change. The diff is a one-token swap, keeps the defensive-copy contract intact, and aligns the codebase with the 2026 baseline API surface.
+
+### AC-2 · Parallelize Model Eviction with ThreadPoolExecutor
+Strength: Strong
+Files: server/core/comfy_proc.py
+Snippet:
+```
+
+def evict_ollama_models(names):
+    """Ask Ollama to unload each model (keep_alive:0). Best-effort."""
+    for name in names:
+        if not name:
+            continue
+        try:
+```
+
+Problem:
+The function `evict_ollama_models` iterates over a list of model names and executes a blocking subprocess call (`ollama unload`) for each one sequentially. With 100+ models, this results in 100+ sequential I/O-bound operations, each potentially waiting for process completion — leading to high total latency that scales linearly with the number of models. The performance cost is real and measurable: without parallelization, the time taken grows proportionally with n, and no batching or reordering is possible without introducing concurrency primitives.
+
+Solution:
+Replace the sequential loop with a `ThreadPoolExecutor` configured with 5 worker threads to run all model evictions concurrently. Submit each model’s unload task as a future, collect results (or ignore them — the scanner says “best-effort”), and let the executor manage thread scheduling. This avoids adding new dependencies or metrics, and uses only the stdlib `concurrent.futures` module already available in the project.
+
+Benefits:
+The total execution time reduces from O(n) to O(n/k) where k=5, meaning that for 100 models, the time becomes roughly 1/5th of the original. This is a meaningful improvement for large model lists, and it’s implementable with existing primitives — no new libraries or logging/metrics infrastructure needed. The fix is safe, deterministic, and matches the project’s constraints.

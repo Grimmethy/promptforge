@@ -24,7 +24,7 @@ import urllib.parse
 import urllib.request
 import uuid
 
-from . import comfy_proc, gpu_session
+from . import comfy_proc, gpu_client, gpu_session
 
 logger = logging.getLogger(__name__)
 
@@ -371,6 +371,40 @@ def start(job, gallery_dir):
     return jid
 
 
+def _gpu_errors():
+    """What a failed GPU claim raises: the in-process session's errors, or the broker client's when PromptForge is a broker client."""
+    return (comfy_proc.ComfyUnavailable, gpu_session.SessionError, gpu_client.BrokerError)
+
+
+def _take_gpu(rec, job=None):
+    """Claim the GPU for a job. With GPU_BROKER_URL set the standalone broker runs the session (and PromptForge keeps it alive while the job runs),
+    on the job's `card` when it names one (the broker's default card otherwise); otherwise the session runs in-process, exactly as before."""
+    on_step = lambda s: _set(rec, comfy_step=s)   # noqa: E731
+    if gpu_client.enabled():
+        card = (job or {}).get("card")
+        if card:
+            gpu_client.acquire("promptforge", on_step=on_step, card=card)
+        else:
+            gpu_client.acquire("promptforge", on_step=on_step)
+        gpu_client.job_started("promptforge")
+    else:
+        gpu_session.begin("promptforge", set_step=on_step)
+
+
+def _gpu_job_done(took_gpu):
+    """A finished job counts as GPU activity. Broker mode releases the job's hold only if the claim succeeded, so a failed claim never ends another
+    job's heartbeat."""
+    if gpu_client.enabled():
+        if took_gpu:
+            gpu_client.job_finished("promptforge")
+    else:
+        gpu_session.touch("promptforge")
+
+
+def _gpu_reclaimed():
+    return _lease_stomped or gpu_session.last_end_reason == "pipeline-reclaimed" or (gpu_client.enabled() and gpu_client.reclaimed())
+
+
 def _set(rec, **kw):
     with _JOBS_LOCK:
         rec.update(kw)
@@ -378,6 +412,7 @@ def _set(rec, **kw):
 
 def _run(job, rec, gallery_dir):
     global _lease_stomped
+    gpu_held = False
     try:
         # Every generation claims the GPU (lease + evict the pipeline's model + RAM check),
         # whether or not ComfyUI had to be started: see comfy_proc.claim_gpu.
@@ -386,8 +421,9 @@ def _run(job, rec, gallery_dir):
         try:
             # Forge family takes the whole GPU: pipeline model evicted, session lease kept fresh by
             # gpu_session's keeper (see gpu_session.py). Idle sessions end and stop ComfyUI.
-            gpu_session.begin("promptforge", set_step=lambda s: _set(rec, comfy_step=s))
-        except (comfy_proc.ComfyUnavailable, gpu_session.SessionError) as exc:
+            _take_gpu(rec, job)
+            gpu_held = True
+        except _gpu_errors() as exc:
             _set(rec, status="error", error=str(exc))
             return
 
@@ -457,7 +493,7 @@ def _run(job, rec, gallery_dir):
     except urllib.error.HTTPError as exc:
         _set(rec, status="error", error=f"{exc.code}: {exc.read().decode()[:400]}")
     except Exception as exc:  # noqa: BLE001
-        if _lease_stomped or gpu_session.last_end_reason == "pipeline-reclaimed":
+        if _gpu_reclaimed():
             _set(rec, status="error", error=(
                 "the agent-manager pipeline reclaimed the GPU -- stop it, or "
                 "retry once it settles"))
@@ -465,7 +501,7 @@ def _run(job, rec, gallery_dir):
             _set(rec, status="error", error=str(exc))
     finally:
         # The session (not the job) owns the lease now; a finished job just counts as activity.
-        gpu_session.touch("promptforge")
+        _gpu_job_done(gpu_held)
 
 
 def get_job(jid):

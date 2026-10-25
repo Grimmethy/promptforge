@@ -13,7 +13,7 @@ import urllib.request
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from core import (assemble, cf_characters, comfy, comfy_proc, data, gpu_session, pose_ops, randomizer, rig,
+from core import (assemble, cf_characters, comfy, comfy_proc, data, gpu_client, gpu_session, pose_ops, randomizer, rig,
                   secondbrain, themes, thumbs)
 
 logger = logging.getLogger(__name__)
@@ -128,16 +128,35 @@ def comfy_status():
 
 # ------------------------------------------------------------ Forge GPU session (family exclusion)
 # One HTTP surface for every Forge component (VideoForge, scripts, ...) so they need no shared code.
-# Protocol: Docs/GPU_FAMILY_PROTOCOL.md. acquire = pipeline's model evicted + ComfyUI up; heartbeat while
+# Protocol: agent-manager-gpu-broker Docs/GPU_FAMILY_PROTOCOL.md (PromptForge Docs/GPU_FAMILY_PROTOCOL.md is a pointer). acquire = pipeline's model evicted + ComfyUI up; heartbeat while
 # working; release = lease dropped and ComfyUI stopped; yield = the pipeline asking for the card back.
+
+def _gpu_forward(method, path):
+    """When PromptForge is a broker client (GPU_BROKER_URL set) its /api/gpu routes proxy to the broker: one session, never two."""
+    body = request.get_json(silent=True) if method == "POST" else None
+    status, payload = gpu_client.forward(method, path, body)
+    return jsonify(payload), status
+
 
 @app.route("/api/gpu/status")
 def gpu_status():
+    if gpu_client.enabled():
+        return _gpu_forward("GET", "/api/gpu/status")
     return jsonify(gpu_session.status())
+
+
+@app.route("/api/gpu/cards")
+def gpu_cards():
+    """The GPU cards the broker knows and who holds each, for a card picker. Only a broker knows cards: in-process PromptForge has the one local GPU."""
+    if gpu_client.enabled():
+        return _gpu_forward("GET", "/api/gpu/cards")
+    return jsonify({"cards": [], "broker": False})
 
 
 @app.route("/api/gpu/acquire", methods=["POST"])
 def gpu_acquire():
+    if gpu_client.enabled():
+        return _gpu_forward("POST", "/api/gpu/acquire")
     owner = str((request.get_json(silent=True) or {}).get("owner") or "").strip()[:40]
     if not owner:
         return jsonify({"error": "owner is required"}), 400
@@ -149,6 +168,8 @@ def gpu_acquire():
 
 @app.route("/api/gpu/heartbeat", methods=["POST"])
 def gpu_heartbeat():
+    if gpu_client.enabled():
+        return _gpu_forward("POST", "/api/gpu/heartbeat")
     owner = str((request.get_json(silent=True) or {}).get("owner") or "").strip()[:40]
     if not gpu_session.touch(owner or None):
         return jsonify({"error": "no active session (the pipeline may have reclaimed the GPU)"}), 409
@@ -157,11 +178,15 @@ def gpu_heartbeat():
 
 @app.route("/api/gpu/release", methods=["POST"])
 def gpu_release():
+    if gpu_client.enabled():
+        return _gpu_forward("POST", "/api/gpu/release")
     return jsonify({"ended": gpu_session.end("released", stop_comfy=True), **{"comfy_up": comfy_proc.comfy_up()}})
 
 
 @app.route("/api/gpu/yield", methods=["POST"])
 def gpu_yield():
+    if gpu_client.enabled():
+        return _gpu_forward("POST", "/api/gpu/yield")
     return jsonify(gpu_session.yield_to_pipeline())
 
 
@@ -621,6 +646,8 @@ def generate():
     spec = request.get_json(force=True, silent=True) or {}
     try:
         job = resolve_job(spec)
+        if spec.get("card"):
+            job["card"] = str(spec["card"]).strip()[:40]   # the broker card this job runs on (GET /api/gpu/cards); absent = the broker's default
         jid = comfy.start(job, GALLERY_DIR)
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": str(exc)}), 400
