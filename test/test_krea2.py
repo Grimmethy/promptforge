@@ -224,5 +224,31 @@ class JobRecordTest(unittest.TestCase):
         self.assertEqual(comfy.get_job(jid)["warnings"], ["pose skeleton ignored: Krea 2 has no ControlNet here"])
 
 
+class ApiSurfaceTest(unittest.TestCase):
+    """The drop warning must not only sit on the job record: it must be in the /api/generate response, so a
+    caller that expected a ControlNet pose hears about it immediately instead of debugging a missing pose."""
+
+    def test_the_generate_response_carries_the_skeleton_drop_warning(self):
+        spec = {"model": KREA, "skeleton": {"people": [{"pose_keypoints_2d": [0.5, 0.2, 1.0] * 18}]}}
+        with mock.patch.object(pf, "list_checkpoints", return_value=["novaFurryXL_ilV140.safetensors"]), \
+             mock.patch.object(comfy.threading, "Thread", return_value=mock.Mock(start=lambda: None)), \
+             mock.patch.object(pf, "logger") as log:
+            resp = pf.app.test_client().post("/api/generate", json=spec)
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertTrue(any("skeleton" in w.lower() for w in body["warnings"]))
+        self.assertTrue(any("skeleton" in (m.args[0] if m.args else "") for m in log.warning.call_args_list),
+                        log.warning.call_args_list)
+
+    def test_an_sdxl_generate_response_has_no_skeleton_warning(self):
+        spec = {"model": "novaFurryXL_ilV140.safetensors", "skeleton": {"people": [{"pose_keypoints_2d": [0.5, 0.2, 1.0] * 18}]}}
+        with mock.patch.object(pf, "list_checkpoints", return_value=["novaFurryXL_ilV140.safetensors"]), \
+             mock.patch.object(comfy.threading, "Thread", return_value=mock.Mock(start=lambda: None)):
+            resp = pf.app.test_client().post("/api/generate", json=spec)
+        body = resp.get_json()
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(body["warnings"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

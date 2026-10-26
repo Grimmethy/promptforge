@@ -615,6 +615,9 @@ def resolve_job(spec):
                 j[k] = v
         if j.pop("skeleton_png", None):
             j["warnings"] = ["pose skeleton ignored: Krea 2 has no ControlNet in PromptForge yet"]
+            # log it too: the warning rides on the job record / API response, but a caller expecting
+            # a ControlNet pose would otherwise have no trace that the skeleton never reached ComfyUI
+            logger.warning("job model %s: dropping pose skeleton (Krea 2 has no ControlNet in PromptForge yet)", j["model"])
         text = (spec.get("prompt_text") or "").strip()
         lead = (spec.get("prompt_lead") or "").strip()
         if lead and not text:
@@ -651,7 +654,8 @@ def generate():
         jid = comfy.start(job, GALLERY_DIR)
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": str(exc)}), 400
-    return jsonify({"job_id": jid, "prompt_used": job["prompt_used"], "seed": job["seed"]})
+    return jsonify({"job_id": jid, "prompt_used": job["prompt_used"], "seed": job["seed"],
+                    "warnings": job.get("warnings") or []})
 
 
 _REPAIRS = {}   # job_id -> (original RGBA, mask L): kept so the finished picture can be pasted back through the mask
