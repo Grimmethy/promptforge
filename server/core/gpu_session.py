@@ -48,6 +48,7 @@ LOCK_WAIT_S = int(os.environ.get("FORGE_LOCK_WAIT_S", "90"))
 EVICT_WAIT_S = int(os.environ.get("FORGE_EVICT_WAIT_S", "45"))
 # How long a second job waits for the job that is starting the session (90 s lock wait + 45 s eviction + a 2-5 min ComfyUI cold start).
 START_WAIT_S = int(os.environ.get("FORGE_START_WAIT_S", "600"))
+INTERRUPTED_PREFIX = "the session ended while starting ("   # shared by _end_locked and _join_starting
 LOCKS_DIR = os.path.expanduser(os.environ.get(
     "AGENT_MANAGER_MODEL_LOCKS_DIR", "/media/model-cache/github/agent-manager/instances/.model-locks"))
 LOCK_STALE_S = 5 * 60   # matches agent-manager's model-inflight-lock STALE_MS
@@ -271,9 +272,16 @@ def _join_starting(sess, step, sleep, now):
         if now() >= deadline:
             raise SessionError("timed out waiting for the Forge GPU session that another job was starting")
         sleep(1)
-    if sess.get("failed"):
-        raise SessionError("the Forge GPU session did not start: " + str(sess["failed"]))
-    return {"started_session": False, "evicted": [], "comfy_started": False}
+    failed = sess.get("failed")
+    if not failed:
+        return {"started_session": False, "evicted": [], "comfy_started": False}
+    failed = str(failed)
+    if failed.startswith(INTERRUPTED_PREFIX):
+        # The session was starting and got torn down mid-start (pipeline reclaimed the GPU / stomped the lease,
+        # or a yield request) -- it was interrupted, not a failed start; "did not start" would mislead the user.
+        reason = failed[len(INTERRUPTED_PREFIX):].rstrip(")")
+        raise SessionError("the Forge GPU session was interrupted during start (the session ended while starting: %s)" % reason)
+    raise SessionError("the Forge GPU session did not start: " + failed)
 
 
 def _check_ram(step, sleep, now):
@@ -311,7 +319,8 @@ def _end_locked(reason, stop_comfy):
     global _session, last_end_reason
     was = _session is not None
     if was and _session.get("ready") is not None and not _session["ready"].is_set():
-        _session["failed"] = "the session ended while starting (%s)" % reason
+        # Marker recognised by _join_starting: the session was ending mid-start (reclaimed/stomped/yielded), not failed to start.
+        _session["failed"] = INTERRUPTED_PREFIX + reason + ")"
         _session["ready"].set()
     _session = None
     if was:
