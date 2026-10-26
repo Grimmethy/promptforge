@@ -161,6 +161,54 @@ class BeginTests(Base):
         self.assertIn("did not start", str(errors["b"]))
         self.assertIsNone(gs._session)
 
+    def test_a_waiting_job_says_interrupted_when_the_pipeline_reclaims_mid_start(self):
+        """The session was starting and got reclaimed (lease stomped) -- it was interrupted during start, not a start failure."""
+        gate, entered = threading.Event(), threading.Event()
+
+        def slow_start(set_step=None, job_id=None):
+            self.calls.append(("start_comfy",))
+            entered.set()
+            gate.wait(5)
+            self.comfy_up = True
+            return {"started": True}
+        with mock.patch.object(cp, "ensure_comfyui_ready", slow_start):
+            errors = {}
+
+            def run(name):
+                try:
+                    gs.begin(name, sleep=lambda s: None)
+                except Exception as exc:  # noqa: BLE001
+                    errors[name] = exc
+            a = threading.Thread(target=run, args=("a",))
+            a.start()
+            self.assertTrue(entered.wait(5))
+            b = threading.Thread(target=run, args=("b",))
+            b.start()
+            time.sleep(0.2)
+            self.assertNotIn("b", errors)
+            os.remove(self.lease)      # the pipeline starts: it stomps the lease while the session is still starting
+            self.assertEqual(gs.keeper_tick(), "ended:pipeline-reclaimed")
+            gate.set()
+            a.join(5)
+            b.join(5)
+        self.assertIsInstance(errors.get("b"), gs.SessionError)
+        self.assertIn("interrupted during start", str(errors["b"]))
+        self.assertIn("pipeline-reclaimed", str(errors["b"]))
+        self.assertNotIn("did not start", str(errors["b"]))
+
+    def test_join_starting_message_distinguishes_interruption_from_failed_start(self):
+        sess = {"ready": threading.Event(), "failed": "the session ended while starting (pipeline-reclaimed)"}
+        sess["ready"].set()
+        with self.assertRaises(gs.SessionError) as cm:
+            gs._join_starting(sess, lambda m: None, lambda s: None, time.time)
+        self.assertIn("interrupted during start", str(cm.exception))
+        self.assertNotIn("did not start", str(cm.exception))
+        sess2 = {"ready": threading.Event(), "failed": "host memory is too low"}
+        sess2["ready"].set()
+        with self.assertRaises(gs.SessionError) as cm:
+            gs._join_starting(sess2, lambda m: None, lambda s: None, time.time)
+        self.assertIn("did not start", str(cm.exception))
+
     def test_status_is_json_serialisable_while_a_session_is_starting_and_after(self):
         """The ready Event in the session dict made GET /api/gpu/status answer HTTP 500 ("Event is not JSON serializable")."""
         self.assertIsNone(gs.status()["session"])
