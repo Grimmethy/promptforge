@@ -80,3 +80,42 @@ Replace the two separate `if src == "custom":` / `elif src == "secondbrain":` bl
 
 Benefits:
 Removes the redundant branch, shrinks the function, and guarantees that custom and secondbrain sources stay in lockstep for any future modification. Reviewers and future contributors see one code path instead of two that must be kept in sync, reducing the chance of a silent behavioral split between the two source types.
+
+### AC-7 · Public accessor for theme loading in `data`
+Strength: Strong
+Files: themes.py, server/core/data.py
+
+Problem:
+`themes.py` calls `data._load_yaml` and `data._load_overlay` directly inside `_all()`. These helpers are private — the leading underscore signals internal use — and every other module in this community (`assemble.py`, `randomizer.py`, `secondbrain.py`) uses `data`'s public surface (`data.get_entry`, `data.load_traits`, `data.DATA_DIR`, etc.). If `data` renames, reorganizes, or changes the signature of those loader helpers, `themes.py` breaks with no public contract to fall back on. The coupling is implicit and invisible to readers.
+
+Solution:
+Add a public accessor in `data` (e.g. `data.load_themes()`) that wraps the existing loader helpers, and have `themes._all()` delegate to it. This makes the contract visible and lets `data` evolve its internals without breaking `themes`.
+
+Benefits:
+The dependency between `themes` and `data` becomes an explicit, documented contract. `data` can refactor its internal loaders without ripple failures, and readers can discover the theme-loading path through the public API rather than by tracing private helpers.
+
+### AC-8 · Schema and validation for `assemble()` spec
+Strength: Strong
+Files: server/core/assemble.py
+
+Problem:
+`assemble()` accepts a dict with a long list of recognized keys (`characters[]`, `scene_tags`, `pose_tags`, `position_tags`, `quality`, `quality_text`, `manual_prefix`, `manual_suffix`, `negative`, `group_scene`, `char_segments`) documented only in the docstring. Unknown keys are silently dropped with no validation, no schema object, and no error path for malformed input. A caller who misspells `scene_tags` as `scen_tags` gets a silently empty scene — no warning, no error, just a wrong prompt. Every new caller has to read the docstring and the code to learn the schema; there is no single source of truth.
+
+Solution:
+Define a small schema or TypedDict for the spec, validate at the entry point, and raise on unknown keys or missing required fields. This turns the implicit contract into an explicit one.
+
+Benefits:
+Callers get immediate, clear feedback on malformed input instead of silent wrong output. The schema becomes the single source of truth for the spec shape, reducing onboarding friction and preventing regressions when the spec evolves.
+
+### AC-9 · Collapse `resolve` and `get_theme` in `themes`
+Strength: Strong
+Files: themes.py
+
+Problem:
+`resolve(name)` does exactly `get_theme(name or "none")` — it adds no logic, no validation, no documentation beyond what `get_theme` already has, and no behavioral difference other than the default. Both functions return the same `{style, setting_bias, palette, lighting, negative_add}` dict. Callers have to learn two names for the same operation, and the docstring of `resolve` restates `get_theme`'s behavior without adding information. If the default should ever change (e.g. to `"none"` vs `None`), the duplication makes it easy to drift.
+
+Solution:
+Collapse to a single public function — either keep `get_theme` with the default baked in, or keep `resolve` and deprecate `get_theme`. Pick one name and remove the other.
+
+Benefits:
+Callers learn one name for one operation. The default behavior is documented in one place, eliminating the risk of the two functions drifting apart. Code review and maintenance become simpler since there is no longer a hidden alias to track.
