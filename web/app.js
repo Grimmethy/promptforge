@@ -76,14 +76,29 @@ function fillSelect(sel, opts, keep) {
 // edit / delete its value — written straight into the backing YAML
 // (POST /api/entry, comments preserved). On success we re-pull /api/presets.
 async function reloadPresets() {
-  PRESETS = await fetch('/api/presets').then(r => r.json());
-  fillSelect('#theme', PRESETS.themes.map(t => t.name));
-  fillSelect('#setting', ['none', ...PRESETS.backgrounds.filter(x => x !== 'none')]);
-  fillSelect('#style', ['none', ...PRESETS.styles.filter(x => x !== 'none')]);
-  if ($('#nsfw')) $('#nsfw').checked = !!PRESETS.nsfw;
-  refreshPoseLib();
-  renderChars();
-  schedulePreview();
+  let r;
+  try {
+    const resp = await fetch('/api/presets');
+    if (!resp.ok) return { ok: false, stage: 'fetch', error: `HTTP ${resp.status} from /api/presets` };
+    r = await resp.json();
+  } catch (e) {
+    console.error('reloadPresets: fetch failed:', e && e.message ? e.message : e);
+    return { ok: false, stage: 'fetch', error: e && e.message ? e.message : String(e) };
+  }
+  PRESETS = r;
+  try {
+    fillSelect('#theme', PRESETS.themes.map(t => t.name));
+    fillSelect('#setting', ['none', ...PRESETS.backgrounds.filter(x => x !== 'none')]);
+    fillSelect('#style', ['none', ...PRESETS.styles.filter(x => x !== 'none')]);
+    if ($('#nsfw')) $('#nsfw').checked = !!PRESETS.nsfw;
+    refreshPoseLib();
+    renderChars();
+    schedulePreview();
+  } catch (e) {
+    console.error('reloadPresets: render/fillSelect failed:', e && e.message ? e.message : e);
+    return { ok: false, stage: 'render', error: e && e.message ? e.message : String(e) };
+  }
+  return { ok: true };
 }
 
 // NSFW toggle: flip the process-global server flag, then re-pull /api/presets so
@@ -97,7 +112,8 @@ async function onNsfwToggle(e) {
   }).then(r => r.json()).catch(() => ({ enabled: !enabled }));
   $('#nsfw').checked = !!r.enabled;
   toast('NSFW content ' + (r.enabled ? 'shown' : 'hidden'));
-  await reloadPresets();
+  const rp = await reloadPresets();
+  if (!rp.ok) { console.error('reloadPresets failed:', rp.error); return; }
   await loadGallery();
 }
 
@@ -158,7 +174,8 @@ function addEntryRow(opts) {
     toast((editing ? 'saved → ' : 'added → ') + key);
     adding = false; nameI.value = '';
     if (opts.onDone) opts.onDone(key);
-    await reloadPresets();
+    const rp = await reloadPresets();
+    if (!rp.ok) { console.error('reloadPresets failed:', rp.error); return; }
     render();
   };
   const del = async () => {
@@ -170,7 +187,8 @@ function addEntryRow(opts) {
     if (r.error) return toast(r.error);
     toast('deleted ' + key);
     if (opts.onDone) opts.onDone('');
-    await reloadPresets();
+    const rp = await reloadPresets();
+    if (!rp.ok) { console.error('reloadPresets failed:', rp.error); return; }
     render();
   };
   saveBtn.onclick = save; delBtn.onclick = del;
@@ -219,7 +237,8 @@ function themeEditBox() {
     if (r.error) return toast(r.error);
     toast((editing ? 'saved theme → ' : 'added theme → ') + key);
     adding = false; nameI.value = '';
-    await reloadPresets();
+    const rp = await reloadPresets();
+    if (!rp.ok) { console.error('reloadPresets failed:', rp.error); return; }
     $('#theme').value = key; persist(); schedulePreview();
     render();
   };
@@ -231,7 +250,8 @@ function themeEditBox() {
     delBtn.disabled = false;
     if (r.error) return toast(r.error);
     toast('deleted theme ' + key);
-    await reloadPresets();
+    const rp = await reloadPresets();
+    if (!rp.ok) { console.error('reloadPresets failed:', rp.error); return; }
     render();
   };
   newBtn.onclick = () => { adding = true; nameI.value = ''; F.forEach(x => fin[x].value = ''); render(); nameI.focus(); };
@@ -257,7 +277,8 @@ async function newPresetCharacter() {
   if (r.error) return toast(r.error);
   const created = r.saved.split('/').pop().replace(/\.ya?ml$/, '');
   toast('created → ' + created + ' (open “✎ edit preset” to flesh it out)');
-  await reloadPresets();
+  const rp = await reloadPresets();
+  if (!rp.ok) { console.error('reloadPresets failed:', rp.error); return; }
   if (state.chars.length < 2) {
     const c = blankChar(); c.source = 'preset'; c.name = created;
     const p = PRESETS.characters.preset.find(x => x.name === created);
