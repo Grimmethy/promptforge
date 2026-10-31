@@ -148,3 +148,52 @@ class ComfyUpWaitTest(Base):
         self.assertFalse(result2["started_session"])
         self.assertFalse(result2["comfy_started"])
 
+    def test_concurrent_heartbeat_completes_while_comfy_up_returns_false(self):
+        """The wait for comfy_up happens OUTSIDE the lock, so a concurrent heartbeat/release is not blocked."""
+        # First call: create a session
+        with mock.patch.object(cp, "comfy_up", return_value=True):
+            result1 = self.begin()
+        self.assertTrue(result1["started_session"])
+
+        # Second call: begin() will wait for comfy_up (returns False)
+        # A concurrent touch() should complete quickly (not block on the lock)
+        heartbeat_completed = threading.Event()
+        heartbeat_result = [None]
+
+        def do_heartbeat():
+            heartbeat_result[0] = gs.touch("heartbeat-owner")
+            heartbeat_completed.set()
+
+        # Patch comfy_up to always return False (so begin() waits the full START_WAIT_S)
+        with mock.patch.object(cp, "comfy_up", return_value=False):
+            # Start heartbeat in a thread
+            t = threading.Thread(target=do_heartbeat)
+            t.start()
+
+            # Wait for heartbeat to complete (should be fast)
+            completed = heartbeat_completed.wait(timeout=2)
+
+            self.assertTrue(completed, "heartbeat should complete within 2 seconds while comfy_up is False")
+            self.assertTrue(heartbeat_result[0])  # touch returned True (session exists)
+            t.join()
+
+    def test_timeout_raises_session_error_with_correct_text(self):
+        """After START_WAIT_S the wait should raise SessionError with the expected text."""
+        # First call: create a session
+        with mock.patch.object(cp, "comfy_up", return_value=True):
+            result1 = self.begin()
+        self.assertTrue(result1["started_session"])
+
+        # Second call: should timeout
+        current_time = [0]
+
+        def fake_now():
+            current_time[0] += 100  # jump by 100 seconds each call
+            return current_time[0]
+
+        with mock.patch.object(cp, "comfy_up", return_value=False), \
+             self.assertRaises(gs.SessionError) as cm:
+            self.begin(now=fake_now)
+
+        self.assertIn("timed out", str(cm.exception))
+        self.assertIn("ComfyUI", str(cm.exception))
