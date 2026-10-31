@@ -205,6 +205,7 @@ def begin(owner, set_step=None, sleep=time.sleep, now=time.time):
                 pass
 
     joining = None
+    wait_for_comfy = False
     with _lock:
         if _session and lease_intact():
             _session["last_activity"] = now()
@@ -212,8 +213,11 @@ def begin(owner, set_step=None, sleep=time.sleep, now=time.time):
             write_lease(owner, keep_acquired=_session["started_iso"])
             ev = _session.get("ready")
             if ev is None or (ev.is_set() and not _session.get("failed")):      # (no event: a session made by something other than begin())
-                return {"started_session": False, "evicted": [], "comfy_started": False}
-            joining = _session           # another job is still clearing the GPU / starting ComfyUI: wait for it below
+                # Mark that we need to wait for ComfyUI, but do the wait OUTSIDE the lock so
+                # concurrent operations (heartbeat, release, other acquires) are not blocked.
+                wait_for_comfy = True
+            else:
+                joining = _session           # another job is still clearing the GPU / starting ComfyUI: wait for it below
         else:
             if _session:   # lease was stomped since the last keeper tick: that session is over
                 _end_locked("pipeline-reclaimed", stop_comfy=True)
@@ -229,6 +233,17 @@ def begin(owner, set_step=None, sleep=time.sleep, now=time.time):
             mine = _session
     if joining is not None:
         return _join_starting(joining, step, sleep, now)
+
+    if wait_for_comfy:
+        # Wait for ComfyUI to be ready (decided inside the lock, but the poll is outside so other
+        # operations are not blocked). Same deadline and error text as the original in-lock path.
+        step("waiting for ComfyUI to be ready…")
+        deadline = now() + START_WAIT_S
+        while not comfy_proc.comfy_up():
+            if now() >= deadline:
+                raise SessionError("timed out waiting for ComfyUI to be ready")
+            sleep(1)
+        return {"started_session": False, "evicted": [], "comfy_started": False}
 
     # The keeper must be running BEFORE the slow part of begin(), not after it. Everything below can take minutes (up to
     # LOCK_WAIT_S for an in-flight pipeline call, the eviction, a cold ComfyUI start of 2-5 min), and the pipeline treats a
@@ -272,6 +287,7 @@ def _join_starting(sess, step, sleep, now):
         if now() >= deadline:
             raise SessionError("timed out waiting for the Forge GPU session that another job was starting")
         sleep(1)
+    # The event is set only after ComfyUI is up in the starting path, so no need to re-check here.
     failed = sess.get("failed")
     if not failed:
         return {"started_session": False, "evicted": [], "comfy_started": False}
