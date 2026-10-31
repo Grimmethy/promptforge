@@ -21,4 +21,44 @@ ComfyUI has in `diffusion_models/` as `krea2:<file>`. The repo is tagged `krea-2
 - No ControlNet: the openpose ControlNet is SDXL-only, so a pose skeleton is **dropped** and the job record carries a `warnings` entry.
 - No regional prompting: a two-character job becomes one text prompt (base + character A + character B).
 - Krea 2 reads natural language. The assembled prompt is the usual tag list; a caller may send `prompt_text` (a sentence prompt) to override it.
-- Not built yet: the style LoRAs from the same repo (each needs its trigger phrase), the INT8 "image style reference" workflow, prompt enhancement.
+
+## LoRA Support
+
+Krea 2 supports style LoRAs from the same repository. Each LoRA requires a trigger phrase.
+
+### Request Shape
+
+```json
+{
+  "model": "krea2:krea2_turbo_int8_convrot.safetensors",
+  "prompt_text": "a pig artist painting in a studio",
+  "loras": [
+    {
+      "name": "triple_exposure.safetensors",
+      "weight": 1.0,
+      "trigger": "TripleExposureRK"
+    },
+    {
+      "name": "watercolor_bright_ink.safetensors",
+      "weight": 1.0,
+      "trigger": "bb_style watercolor"
+    }
+  ],
+  "sampler": "euler",
+  "scheduler": "simple",
+  "steps": 8,
+  "cfg": 1.0,
+  "seed": 42,
+  "width": 1168,
+  "height": 1536
+}
+```
+
+### Validation Rules
+
+- **LoRA count**: Maximum 4 LoRAs per job
+- **LoRA file**: Must exist in `models/loras/` directory (ComfyUI models folder)
+- **Weight**: Must be between -2 and 2 (inclusive)
+- **Trigger**: Optional; if provided, prefixed to prompt in LoRA order (comma-separated, deduplicated)
+- **Dimensions**: Must be multiples of 16 (rounded down with warning if not)
+- **Non-Krea-2 models**: LoRAs are ignored with a warning
