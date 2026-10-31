@@ -212,6 +212,15 @@ def begin(owner, set_step=None, sleep=time.sleep, now=time.time):
             write_lease(owner, keep_acquired=_session["started_iso"])
             ev = _session.get("ready")
             if ev is None or (ev.is_set() and not _session.get("failed")):      # (no event: a session made by something other than begin())
+                # Wait for ComfyUI to be ready even when the session was already started by another job.
+                # Without this, a concurrent job could return immediately and try to connect to ComfyUI
+                # before it is accepting connections, causing "Connection refused" errors.
+                step("waiting for ComfyUI to be ready…")
+                deadline = now() + START_WAIT_S
+                while not comfy_proc.comfy_up():
+                    if now() >= deadline:
+                        raise SessionError("timed out waiting for ComfyUI to be ready")
+                    sleep(1)
                 return {"started_session": False, "evicted": [], "comfy_started": False}
             joining = _session           # another job is still clearing the GPU / starting ComfyUI: wait for it below
         else:
@@ -271,6 +280,12 @@ def _join_starting(sess, step, sleep, now):
     while not sess["ready"].is_set():
         if now() >= deadline:
             raise SessionError("timed out waiting for the Forge GPU session that another job was starting")
+        sleep(1)
+    # Verify ComfyUI is actually up now (it could have crashed between the event being set and now).
+    comfy_deadline = now() + START_WAIT_S
+    while not comfy_proc.comfy_up():
+        if now() >= comfy_deadline:
+            raise SessionError("timed out waiting for ComfyUI to be ready")
         sleep(1)
     failed = sess.get("failed")
     if not failed:
