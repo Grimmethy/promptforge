@@ -204,10 +204,12 @@ def describe_character(text):
     return ", ".join(head + keep)
 
 
-def krea2_prompt(lead, segments, style_tags):
+def krea2_prompt(lead, segments, style_tags, loras=None):
     """One natural-language prompt for Krea 2: the caller's sentence `lead`, then each character's description (two characters labelled left /
-    right, A first, as PromptForge's regional layout does), then the style. No SDXL quality tags, no weight syntax."""
-    parts = [str(lead).strip().rstrip(".")]
+    right, A first, as PromptForge's regional layout does), then the style. No SDXL quality tags, no weight syntax.
+    
+    If `loras` is provided and any LoRA has a 'trigger', those triggers are prefixed to the prompt (comma-separated, deduplicated)."""
+    parts = [str(lead).strip().rstrip(".") or ""]
     segs = [describe_character(x) for x in segments if describe_character(x)]
     if len(segs) == 2:
         parts += ["On the left: " + segs[0], "On the right: " + segs[1]]
@@ -216,15 +218,105 @@ def krea2_prompt(lead, segments, style_tags):
     style = plain_tags(style_tags)
     if style:
         parts.append("Style: " + style)
+    
+    # Prefix LoRA triggers
+    if loras:
+        triggers = [l.get("trigger") for l in loras if l.get("trigger")]
+        if triggers:
+            # Deduplicate while preserving order
+            seen = set()
+            unique_triggers = []
+            for t in triggers:
+                if t not in seen:
+                    seen.add(t)
+                    unique_triggers.append(t)
+            
+            trigger_str = ", ".join(unique_triggers)
+            joined = ". ".join(p for p in parts if p)
+            if not joined.startswith(trigger_str):
+                parts.insert(0, trigger_str)
+    
     return ". ".join(p for p in parts if p)
+
+
+def validate_krea2_loras(loras, loras_dir=None):
+    """Validate LoRA list for Krea 2 jobs.
+    
+    Args:
+        loras: List of LoRA dicts with 'name' and optional 'weight'/'trigger'
+        loras_dir: Directory to check for LoRA files (defaults to models/loras relative to ComfyUI)
+    
+    Returns:
+        Cleaned list of validated LoRA dicts
+    
+    Raises:
+        ValueError: If validation fails (weight out of bounds, too many LoRAs, etc.)
+        FileNotFoundError: If a LoRA file doesn't exist
+    """
+    if not isinstance(loras, list):
+        raise ValueError("loras must be a list")
+    if len(loras) > 4:
+        raise ValueError(f"Maximum 4 LoRAs allowed, got {len(loras)}")
+    
+    # Default to ComfyUI models/loras directory
+    if loras_dir is None:
+        # Try to find ComfyUI models directory
+        comfy_models = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ComfyUI", "models")
+        loras_dir = os.path.join(comfy_models, "loras")
+    
+    cleaned = []
+    for i, lora in enumerate(loras):
+        if not isinstance(lora, dict):
+            raise ValueError(f"LoRA #{i} must be a dict")
+        if "name" not in lora:
+            raise ValueError(f"LoRA #{i} missing 'name'")
+        if "weight" not in lora:
+            raise ValueError(f"LoRA #{i} missing 'weight'")
+        
+        weight = lora["weight"]
+        if not isinstance(weight, (int, float)) or weight < -2 or weight > 2:
+            raise ValueError(f"LoRA '{lora['name']}' weight {weight} out of bounds [-2, 2]")
+        
+        lora_file = os.path.join(loras_dir, lora["name"])
+        if not os.path.exists(lora_file):
+            raise FileNotFoundError(f"LoRA file not found: {lora['name']} (checked {loras_dir})")
+        
+        cleaned.append({
+            "name": lora["name"],
+            "weight": float(weight),
+            "trigger": lora.get("trigger")
+        })
+    return cleaned
+
+
+def round_krea2_size(width, height):
+    """Round width and height down to nearest multiple of 16 for Krea 2.
+    
+    Args:
+        width: Original width
+        height: Original height
+    
+    Returns:
+        Tuple of (rounded_width, rounded_height, warning_message_or_None)
+    """
+    if width % 16 != 0 or height % 16 != 0:
+        rounded_w = width - (width % 16)
+        rounded_h = height - (height % 16)
+        warning = f"Krea 2 requires dimensions to be multiples of 16: rounded {width}x{height} to {rounded_w}x{rounded_h}"
+        return rounded_w, rounded_h, warning
+    return width, height, None
 
 
 def build_krea2_graph(job):
     """The official Comfy-Org Krea-2 Turbo text-to-image graph: UNET + Qwen3-VL CLIP (type krea2) + VAE, the positive encoded once and a
-    zeroed copy of it as the negative, one KSampler (8 steps, cfg 1, euler/simple), decode, save."""
+    zeroed copy of it as the negative, one KSampler (8 steps, cfg 1, euler/simple), decode, save.
+    
+    If `loras` is in the job, chains LoraLoader nodes between the UNET and KSampler, each taking the previous model/clip output."""
     positive = (job.get("positive") or "").strip() or ". ".join(
         t for t in (job.get("base"), job.get("region_a"), job.get("region_b")) if t)
-    return {
+    
+    # Start with base graph
+    graph = {
         "1": {"class_type": "UNETLoader",
               "inputs": {"unet_name": str(job["model"])[len(KREA2_PREFIX):], "weight_dtype": "default"}},
         "2": {"class_type": "CLIPLoader",
@@ -235,14 +327,44 @@ def build_krea2_graph(job):
         "7": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["6", 0]}},
         "10": {"class_type": "EmptyLatentImage",
                "inputs": {"width": int(job["width"]), "height": int(job["height"]), "batch_size": int(job["batch"])}},
-        "11": {"class_type": "KSampler", "inputs": {
-            "seed": int(job["seed"]), "steps": int(job["steps"]), "cfg": float(job["cfg"]),
-            "sampler_name": job["sampler"], "scheduler": job["scheduler"], "denoise": 1.0,
-            "model": ["1", 0], "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["10", 0]}},
-        "12": {"class_type": "VAEDecode", "inputs": {"samples": ["11", 0], "vae": ["3", 0]}},
-        "13": {"class_type": "SaveImage",
-               "inputs": {"filename_prefix": f"promptforge_{job['id'][:8]}", "images": ["12", 0]}},
     }
+    
+    # Chain LoRAs if present
+    loras = job.get("loras")
+    if loras:
+        model_ref = ["1", 0]  # UNETLoader output
+        clip_ref = ["2", 0]   # CLIPLoader output
+        for i, lora in enumerate(loras):
+            lora_id = str(100 + i)  # Use IDs starting at 100 to avoid conflicts
+            graph[lora_id] = {
+                "class_type": "LoraLoader",
+                "inputs": {
+                    "model": model_ref,
+                    "clip": clip_ref,
+                    "lora_name": lora["name"],
+                    "strength_model": lora.get("weight", 1.0),
+                    "strength_clip": lora.get("weight", 1.0)
+                }
+            }
+            model_ref = [lora_id, 0]
+            clip_ref = [lora_id, 1]
+    else:
+        model_ref = ["1", 0]
+        clip_ref = ["2", 0]
+    
+    # Update CLIPTextEncode and ConditioningZeroOut to use the final clip reference
+    graph["6"]["inputs"]["clip"] = clip_ref
+    graph["7"]["inputs"]["conditioning"] = ["6", 0]
+    
+    # KSampler takes the final model output
+    graph["11"] = {"class_type": "KSampler", "inputs": {
+        "seed": int(job["seed"]), "steps": int(job["steps"]), "cfg": float(job["cfg"]),
+        "sampler_name": job["sampler"], "scheduler": job["scheduler"], "denoise": 1.0,
+        "model": model_ref, "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["10", 0]}}
+    graph["12"] = {"class_type": "VAEDecode", "inputs": {"samples": ["11", 0], "vae": ["3", 0]}}
+    graph["13"] = {"class_type": "SaveImage",
+                   "inputs": {"filename_prefix": f"promptforge_{job['id'][:8]}", "images": ["12", 0]}}
+    return graph
 
 
 def build_repair_graph(job):
