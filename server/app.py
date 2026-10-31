@@ -613,8 +613,25 @@ def resolve_job(spec):
         for k, v in (("steps", 8), ("cfg", 1.0), ("sampler", "euler"), ("scheduler", "simple")):
             if spec.get(k) is None:
                 j[k] = v
+        
+        # Validate and handle LoRAs for Krea 2
+        if "loras" in spec:
+            try:
+                j["loras"] = comfy.validate_krea2_loras(spec["loras"])
+            except (ValueError, FileNotFoundError) as e:
+                raise ValueError(f"Invalid LoRA configuration: {e}")
+        
+        # Round dimensions to multiples of 16 for Krea 2
+        rounded_w, rounded_h, size_warning = comfy.round_krea2_size(j["width"], j["height"])
+        if size_warning:
+            j["warnings"] = j.get("warnings") or []
+            j["warnings"].append(size_warning)
+            j["width"] = rounded_w
+            j["height"] = rounded_h
+        
         if j.pop("skeleton_png", None):
-            j["warnings"] = ["pose skeleton ignored: Krea 2 has no ControlNet in PromptForge yet"]
+            j["warnings"] = j.get("warnings") or []
+            j["warnings"].append("pose skeleton ignored: Krea 2 has no ControlNet in PromptForge yet")
             # log it too: the warning rides on the job record / API response, but a caller expecting
             # a ControlNet pose would otherwise have no trace that the skeleton never reached ComfyUI
             logger.warning("job model %s: dropping pose skeleton (Krea 2 has no ControlNet in PromptForge yet)", j["model"])
@@ -622,10 +639,16 @@ def resolve_job(spec):
         lead = (spec.get("prompt_lead") or "").strip()
         if lead and not text:
             # a sentence from the caller (a StoryForge shot) + the characters' descriptions + the style, as one natural-language prompt
-            text = comfy.krea2_prompt(lead, [x["segment"] for x in j["char_segments"]], j["scene_tags"])
+            # Pass LoRAs to krea2_prompt for trigger prefixing
+            text = comfy.krea2_prompt(lead, [x["segment"] for x in j["char_segments"]], j["scene_tags"], loras=j.get("loras"))
         if text:    # Krea 2 reads natural language: a caller may hand over the sentence prompt instead of the tag soup
             j["positive"] = text
             j["prompt_used"] = {"positive": text, "negative": j["negative"]}
+    else:
+        # Non-Krea-2 model: ignore LoRAs with a warning
+        if "loras" in spec:
+            j["warnings"] = j.get("warnings") or []
+            j["warnings"].append(f"LoRAs ignored for non-Krea-2 model '{j['model']}'")
 
     j["spec"] = spec
     j["nsfw"] = nsfw
