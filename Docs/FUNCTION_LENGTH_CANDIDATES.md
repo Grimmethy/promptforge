@@ -47,3 +47,157 @@ Extract three sibling builder functions that each receive `c` (the character obj
 
 Benefits:
 Each builder is independently unit-testable: a test can call `buildOutfitCascade` with a stub `c.outfit = { gender:'f', genre:null, subgenre:null, key:null }`, fire the gender `<select>` change handler, and assert that `c.outfit.genre` was nulled—without constructing a header or expression DOM. Code review diffs become section-scoped: a change to the expression pool validation touches only `buildExpressionPicker`, and a reviewer can approve or reject it without reading the cascade logic. The 118-line wall of code becomes a 20-line dispatcher plus three 25–40-line functions, each short enough to fit on a single screen, which removes the "scroll-past-unrelated-code" cost that made the outfit cascade the hardest part of the file to debug.
+
+### AC-2 · Monolithic Orchestrator with Tangled Responsibilities
+Strength: Strong
+Files: server/app.py
+Symbol: resolve_job
+Snippet:
+```
+
+
+def resolve_job(spec):
+    j = dict(_DEFAULTS)
+    for k in _DEFAULTS:
+        if spec.get(k) is not None:
+            j[k] = spec[k]
+    j["model"] = spec.get("model") or (list_checkpoints() or ["novaFurryXL_ilV140.safetensors"])[0]
+
+    th = themes.resolve(spec.get("theme"))
+    style_tags = _cat_tags("styles", spec.get("style")) or th["style"]
+    setting_tags = _cat_tags("backgrounds", spec.get("setting")) or th["setting_bias"]
+    scene_tags = data.normalize_kw(setting_tags, style_tags, th["palette"], th["lighting"])
+
+    chars = [c for c in (spec.get("characters") or []) if c][:2]
+    n = len(chars)
+    j["n_chars"] = n
+
+    nsfw = False
+    char_segs, char_negs = [], []
+    for c in chars:
+        if data.outfit_in_overlay(c.get("outfit") or {}) or data.entry_in_overlay(
+                "expressions", c.get("expression") or ""):
+            nsfw = True
+        if c.get("source") == "secondbrain" and not c.get("text"):
+            sb = secondbrain.get_character(c.get("name", ""))
+            c = {**c, "text": sb.get("base", "")}
+        seg, neg = assemble.character_segment(c)
+        char_segs.append(seg)
+        if neg:
+            char_negs.append(neg)
+    # per-character injected text, in card order — surfaced in /api/preview so
+    # each character card can show exactly what it contributes to the prompt
+    j["char_segments"] = [{"segment": s} for s in char_segs]
+
+    # pose / skeleton
+    #
+    # Two independent things come out of here:
+    #   - `frame`: COCO-18 keypoints that become the ControlNet skeleton PNG —
+    #     this alone drives the pose.
+    #   - `pose_tags`: ONLY orbit-camera facing words (from yaw/pitch). A library
+    #     pose's own `tags` (e.g. "standing, arms at sides") are deliberately NOT
+    #     put in the prompt — they used to fight an edited skeleton.
+    # The editor sends its live 3-D rig projection as `skeleton.people` (already
+    # oriented — do not re-project it). An API caller may instead pass only
+    # `pose_position` (+ yaw/pitch); then we project the stored rig here.
+    pose_tags = ""
+    frame = None
+    sk = spec.get("skeleton") or {}
+    pos_name = spec.get("pose_position")
+    yaw = float(spec.get("yaw", 0.0) or 0.0)
+    pitch = float(spec.get("pitch", 0.0) or 0.0)
+    az, el = yaw * 3.141592653589793, pitch * 1.15   # inverse of editor exportYawPitch
+    if yaw or pitch:
+        pose_tags = data.orientation_tags(yaw, pitch)
+    pk = (spec.get("pose_keywords") or "").strip()
+    if pk:
+        pose_tags = data.normalize_kw(pose_tags, pk)
+    if pos_name and data.cn_position_in_overlay(pos_name):
+        nsfw = True
+    if pos_name and not sk.get("people"):
+        # API fallback: a pose name but no edited skeleton -> project the stored rig.
+        _rig, _ = data.cn_canonical_rig(pos_name)
+        if _rig is not None:
+            frame = rig.project_frame(_rig, az, el, j["width"], j["height"])
+    if sk.get("people"):
+        frame = {"people": sk["people"],
+                 "canvas_width": j["width"], "canvas_height": j["height"]}
+    # skip ControlNet if the projected skeleton collapsed to nothing usable
+    if frame is not None and _frame_has_joints(frame):
+        frame = pose_ops.transform(frame, canvas_w=j["width"], canvas_h=j["height"])
+        j["skeleton_png"] = pose_ops.render_png(frame, j["width"], j["height"])
+    j["pose_tags"] = pose_tags
+    j["scene_tags"] = scene_tags
+
+    # A rear camera contradicts the character's face/front-of-body tokens.
+    #  - 3/4 .. near-profile-back (|yaw| > 0.55): just drop gaze-at-camera.
+    #  - full back view (|yaw| >= 0.8): strip every face + breast/front token so
+    #    "back view" isn't outvoted; skipped if the subject is looking back.
+    rear_neg = ""
+    ay = abs(yaw)
+    if ay > 0.55:
+        strip = _rear_strip if ay >= 0.8 else _face_away
+        char_segs = [strip(s) for s in char_segs]
+        pose_tags = data.normalize_kw(strip(pose_tags),
+                                      "(facing away:1.2), back turned to viewer")
+        j["pose_tags"] = pose_tags
+        j["char_segments"] = [{"segment": s} for s in char_segs]
+        if ay >= 0.8 and not any(p in " ".join(char_segs).lower()
+                                 for p in _LOOK_BACK):
+            rear_neg = ("looking at viewer, eye contact, facing viewer, front view, "
+                        "face focus, portrait")
+
+    j["negative"] = data.normalize_kw(
+        (spec.get("negative") or "").strip(), rear_neg, *char_negs, th["negative_add"],
+        assemble.DEFAULT_NEGATIVE)
+
+    if n == 2:
+        j["region_a"] = char_segs[0]
+        j["region_b"] = char_segs[1]
+        j["base"] = data.normalize_kw(assemble.DEFAULT_QUALITY, scene_tags, pose_tags)
+        j["prompt_used"] = {"region_a": j["region_a"], "region_b": j["region_b"],
+                            "base": j["base"], "negative": j["negative"]}
+    else:
+        built = assemble.assemble({
+            "characters": chars, "scene_tags": scene_tags, "pose_tags": pose_tags,
+            "char_segments": char_segs})
+        j["positive"] = built["positive"]
+        j["prompt_used"] = {"positive": j["positive"], "negative": j["negative"]}
+
+    if comfy.is_krea2(j["model"]):
+        # Krea 2 Turbo is distilled: 8 steps, cfg 1, euler/simple. The SDXL defaults would ruin it, so an unspecified value gets the Krea
+        # one and an explicit one is honoured. There is no ControlNet for it: a pose skeleton is dropped, loudly.
+        for k, v in (("steps", 8), ("cfg", 1.0), ("sampler", "euler"), ("scheduler", "simple")):
+            if spec.get(k) is None:
+                j[k] = v
+        if j.pop("skeleton_png", None):
+            j["warnings"] = ["pose skeleton ignored: Krea 2 has no ControlNet in PromptForge yet"]
+        text = (spec.get("prompt_text") or "").strip()
+        lead = (spec.get("prompt_lead") or "").strip()
+        if lead and not text:
+            # a sentence from the caller (a StoryForge shot) + the characters' descriptions + the style, as one natural-language prompt
+            text = comfy.krea2_prompt(lead, [x["segment"] for x in j["char_segments"]], j["scene_tags"])
+        if text:    # Krea 2 reads natural language: a caller may hand over the sentence prompt instead of the tag soup
+            j["positive"] = text
+            j["prompt_used"] = {"positive": text, "negative": j["negative"]}
+
+    j["spec"] = spec
+    j["nsfw"] = nsfw
+    return j
+```
+
+Problem:
+The `resolve_job` function is not merely long — it is a monolithic orchestrator managing at least eight logically distinct concerns: default merging, model selection, theme/tag resolution, character processing, pose/skeleton handling, rear-view modifications, negative prompt construction, and two-character prompt assembly. Each section has its own edge cases and dependencies (e.g., pose logic modifies `j` and `nsfw`, rear-view logic modifies `char_segments` and `pose_tags`, Krea 2 handling is a conditional side-effect). This entanglement makes the function brittle to change, unreadable without context, and impossible to test in isolation.
+
+Solution:
+Extract each concern into a clearly named, self-contained function: `_merge_defaults`, `_select_model`, `_resolve_scene_tags`, `_process_characters`, `_process_pose`, `_build_negative_prompt`, `_assemble_positive_prompt`, `_detect_nsfw`, and `_apply_krea2_config`. Each function should operate on its own inputs and return only its own outputs, with minimal side effects on shared state. The main `resolve_job` should only orchestrate by assigning values to `j` and returning it — no logic should remain in the main body.
+
+Benefits:
+Decomposing this function improves testability by enabling unit tests for each concern (e.g., testing `_process_pose` with mocked `j` and `spec`). It improves readability by isolating each concern’s logic into a named, focused block. It improves maintainability by allowing changes to pose logic (e.g., adding new orientation tags) without risking unintended side effects on character segments or negative prompts. Reviewers can now focus on one concern at a time, reducing cognitive load and increasing confidence in changes.
+
+VERDICT CONSTRAINT (mandatory for this task):
+- The function snippet IS provided above in this prompt; you do not need to request it or assume it is missing.
+- You MUST render exactly one verdict: GENUINE or FALSE POSITIVE.
+- Refusals, hedging, or a third outcome (including "Uncertain", "I cannot determine", or any other qualifier) are NOT acceptable. Pick the one verdict that best fits the evidence in the snippet and commit to it.
+
+VERDICT: GENUINE
