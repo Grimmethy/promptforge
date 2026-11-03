@@ -91,3 +91,26 @@ Replace both instances of `json.loads(json.dumps(gs.status()))` with `copy.deepc
 
 Benefits:
 The fix eliminates the O(n) serialization/deserialization overhead per call, reducing test runtime and avoiding potential bugs from JSON serialization quirks (e.g., non-serializable types, precision loss). The fix is trivial, safe, and matches the project’s existing tooling — no new dependencies or APIs required.
+
+### AC-5 · Parallelize Polling to Eliminate Event Loop Blocking
+Strength: Strong
+Files: web/app.js
+Snippet:
+```
+}
+
+async function pollJob(jid, tile, meta) {
+  for (let i = 0; i < 400; i++) {
+    await new Promise(r => setTimeout(r, 2000));
+    const j = await fetch('/api/job/' + jid).then(r => r.json());
+    const bar = tile.querySelector('.bar');
+```
+
+Problem:
+The `pollJob` function executes 400 sequential `fetch` calls, each awaiting a 2-second delay before proceeding — blocking the event loop for 800 seconds total. This is wasteful and unnecessary, as each fetch is independent and can be executed concurrently. The current design serializes all operations, creating a 13.3-minute bottleneck even when no real-time ordering is required.
+
+Solution:
+Replace the loop with a single `Promise.all` call that runs all 400 fetches concurrently, then reorder results by index to preserve the original sequence. This eliminates the 800-second wait time, reducing the total execution time to ~2 seconds (plus network latency), while keeping the event loop responsive.
+
+Benefits:
+The total runtime drops from 13.3 minutes to ~2 seconds, freeing the event loop for other tasks and improving responsiveness. The fix is minimal, uses only existing primitives (`Promise.all`, `setTimeout`, `fetch`), and preserves ordering if needed — which it does, via reordering — without adding any new dependencies or APIs.
