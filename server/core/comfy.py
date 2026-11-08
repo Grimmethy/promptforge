@@ -24,7 +24,7 @@ import urllib.parse
 import urllib.request
 import uuid
 
-from . import comfy_proc, gpu_client, gpu_session
+from . import comfy_proc, events, gpu_client, gpu_session
 
 logger = logging.getLogger(__name__)
 
@@ -643,6 +643,10 @@ def _run(job, rec, gallery_dir):
                            "images": saved, "ts": time.time()}
                 with open(os.path.join(outdir, f"{job['id'][:8]}.json"), "w") as fh:
                     json.dump(sidecar, fh, indent=1)
+                try:
+                    events.publish("gallery-new", {"job": job["id"], "images": saved, "nsfw": bool(job.get("nsfw"))})
+                except Exception:  # noqa: BLE001 - telling the pages is a courtesy, never a reason to fail the job
+                    logger.warning("job %s: gallery-new event failed", job["id"], exc_info=True)
                 _set(rec, status="done", images=saved)
                 return
         _set(rec, status="error", error="timed out waiting for ComfyUI")

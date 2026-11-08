@@ -7,13 +7,14 @@ delegated to ComfyUI (:8188) — see core/comfy.py (added next). Bind 127.0.0.1.
 import json
 import logging
 import os
+import queue
 import re
 import urllib.error
 import urllib.request
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from core import (assemble, cf_characters, comfy, comfy_proc, data, gpu_client, gpu_session, pose_ops, randomizer, rig,
+from core import (assemble, cf_characters, comfy, comfy_proc, data, events, gpu_client, gpu_session, pose_ops, randomizer, rig,
                   secondbrain, themes, thumbs)
 
 logger = logging.getLogger(__name__)
@@ -824,6 +825,34 @@ def api_repair_result(jid):
     return Response(buf.getvalue(), mimetype="image/png")
 
 
+SSE_PING_S = 15
+
+
+@app.route("/api/events")
+def api_events():
+    """Server-sent events for the gallery: `gallery-new` {job, images, nsfw} when a generation finishes, `gallery-removed` {file} when an
+    image is deleted. A `: ping` comment goes out when idle so proxies keep the stream open; the subscriber is released on disconnect."""
+    q = events.subscribe()
+    if q is None:
+        return jsonify({"error": "too many event streams open"}), 503
+
+    def stream():
+        try:
+            yield "retry: 3000\n\n"
+            while True:
+                try:
+                    name, payload = q.get(timeout=SSE_PING_S)
+                except queue.Empty:
+                    yield ": ping\n\n"
+                    continue
+                yield f"event: {name}\ndata: {payload}\n\n"
+        finally:
+            events.unsubscribe(q)
+
+    return Response(stream(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 @app.route("/api/job/<jid>")
 def job(jid):
     rec = comfy.get_job(jid)
@@ -940,6 +969,8 @@ def image(name):
             sp = os.path.join(d, stem + ".json")
             if os.path.isfile(sp):
                 os.remove(sp)
+        if deleted:
+            events.publish("gallery-removed", {"file": name})
         return jsonify({"deleted": deleted})
     return send_from_directory(GALLERY_DIR, name)
 
