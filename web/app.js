@@ -60,6 +60,7 @@ async function boot() {
   renderChars();
   await comfyStatus();
   await loadGallery();
+  connectEvents();
   schedulePreview();
   setInterval(comfyStatus, 15000);
 }
@@ -754,7 +755,9 @@ async function pollJob(jid, tile, meta) {
 
 // `meta` may be pre-supplied (fresh generation); otherwise it's fetched from
 // /api/gallery-meta only when a menu action or the lightbox actually needs it.
+const _shown = new Set();   // gallery files that have a tile on the page (so a pushed event never doubles one)
 function imgTile(file, meta = null) {
+  _shown.add(file);
   let _m = meta;
   const getMeta = async () => _m || (_m = await fetch('/api/gallery-meta/' + file).then(r => r.json()).catch(() => ({})));
   const menu = el('div', { class: 'menu row' }, [
@@ -766,12 +769,12 @@ function imgTile(file, meta = null) {
       else toast('no rig saved for this image');
     }),
     mBtn('⬇', 'download', () => { const a = el('a', { href: '/api/image/' + file, download: file.split('/').pop() }); a.click(); }),
-    mBtn('🗑', 'delete', async () => { await fetch('/api/image/' + file, { method: 'DELETE' }); tile.remove(); }),
+    mBtn('🗑', 'delete', async () => { await fetch('/api/image/' + file, { method: 'DELETE' }); _shown.delete(file); tile.remove(); _galOffset = Math.max(0, _galOffset - 1); _galTotal = Math.max(0, _galTotal - 1); }),
   ]);
   const img = el('img', { src: '/api/thumb/' + file, loading: 'lazy', onclick: async () => openLB(file, await getMeta()) });
   const done = () => tile.classList.remove('loading');
   img.addEventListener('load', done); img.addEventListener('error', done);
-  const tile = el('div', { class: 'tile loading' }, [img, menu]);
+  const tile = el('div', { class: 'tile loading', 'data-file': file }, [img, menu]);
   return tile;
 }
 const mBtn = (t, title, fn) => el('button', { class: 'x', title, onclick: fn }, t);
@@ -823,6 +826,40 @@ async function loadGallery(reset = true) {
         { root: g, rootMargin: '800px' }))).observe(s);
     }
   } finally { _galLoading = false; }
+}
+
+// ---- live gallery: the server pushes finished and deleted images, so no refresh and no polling ----
+function addNewTiles(files) {
+  const g = $('#gallery');
+  const fresh = files.filter(f => !_shown.has(f));
+  if (!fresh.length) return;
+  for (const f of fresh.slice().reverse()) g.prepend(imgTile(f));   // keep the batch's own order, newest group first
+  _galOffset += fresh.length; _galTotal += fresh.length;
+}
+
+async function reconcileGallery() {   // once after a dropped stream comes back: pick up anything missed meanwhile
+  const r = await fetch(`/api/gallery?offset=0&limit=${_GAL_PAGE}`).then(r => r.json()).catch(() => null);
+  if (r && r.items) addNewTiles(r.items.map(it => it.file));
+}
+
+function connectEvents() {
+  if (!window.EventSource) return;
+  const es = new EventSource('/api/events');
+  let dropped = false;
+  es.addEventListener('gallery-new', e => {
+    const d = JSON.parse(e.data);
+    if (d.nsfw && !$('#nsfw').checked) return;
+    addNewTiles(d.images || []);
+  });
+  es.addEventListener('gallery-removed', e => {
+    const f = JSON.parse(e.data).file;
+    _shown.delete(f);
+    const gone = $$('#gallery .tile').filter(n => n.dataset.file === f);
+    gone.forEach(n => n.remove());
+    _galOffset = Math.max(0, _galOffset - gone.length); _galTotal = Math.max(0, _galTotal - gone.length);   // keep paging in step
+  });
+  es.onerror = () => { dropped = true; };      // EventSource reconnects by itself (server sends retry: 3000)
+  es.onopen = () => { if (dropped) { dropped = false; reconcileGallery(); } };
 }
 
 // ------------------------------------------------------------- persistence
