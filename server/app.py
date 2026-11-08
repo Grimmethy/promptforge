@@ -684,6 +684,31 @@ def generate():
 _REPAIRS = {}   # job_id -> (original RGBA, mask L): kept so the finished picture can be pasted back through the mask
 
 
+def _parse_background(raw):
+    """Optional `background` form field: #rrggbb or rrggbb. Returns (rgb tuple or None, error string or None); None means the default grey."""
+    raw = (raw or "").strip().lstrip("#")
+    if not raw:
+        return None, None
+    if not re.fullmatch(r"[0-9a-fA-F]{6}", raw):
+        return None, "background must be a hex colour like #f4e8cd"
+    return tuple(int(raw[i:i + 2], 16) for i in (0, 2, 4)), None
+
+
+def _repair_job_defaults(form, model):
+    """Steps / cfg / sampler / scheduler / pose / warnings shared by /api/regenerate and /api/repair. An SDXL model keeps the old defaults
+    (steps 28, cfg 5.0, pose as requested); a Krea 2 model is distilled (8 steps, cfg 1.0, euler/simple unless the form says
+    otherwise) and has no ControlNet here, so a requested pose is ignored with a warning on the job record."""
+    krea = comfy.is_krea2(model)
+    out = {"steps": int(form.get("steps") or (8 if krea else 28)),
+           "cfg": float(form.get("cfg") or (1.0 if krea else 5.0)), "warnings": []}
+    if krea:
+        out["sampler"], out["scheduler"] = "euler", "simple"
+        if form.get("pose", "") not in ("", "0", "false"):
+            out["warnings"].append("pose skeleton ignored: Krea 2 has no ControlNet in PromptForge yet")
+            logger.warning("job model %s: ignoring pose request (Krea 2 has no ControlNet in PromptForge yet)", model)
+    return out
+
+
 @app.route("/api/repair", methods=["POST"])
 def api_repair():
     """Inpaint. multipart: image (PNG, alpha = holes), mask (PNG, white = repaint, optional), prompt, negative,
@@ -703,16 +728,22 @@ def api_repair():
     prompt = (request.form.get("prompt") or "").strip()
     if not prompt:
         return jsonify({"error": "prompt is required"}), 400
-    img_png, mask_png, size = repair.prepare(img, mask)
+    bg, bg_err = _parse_background(request.form.get("background"))
+    if bg_err:
+        return jsonify({"error": bg_err}), 400
+    model = request.form.get("model") or (list_checkpoints() or ["novaFurryXL_ilV140.safetensors"])[0]
+    img_png, mask_png, size = repair.prepare(img, mask, snap=16 if comfy.is_krea2(model) else 8, background=bg or repair.GREY)
+    denoise = min(1.0, max(0.2, float(request.form.get("denoise") or 0.7)))
     j = dict(_DEFAULTS)
     j.update(
         positive=prompt, negative=(request.form.get("negative") or "").strip(),
-        denoise=min(1.0, max(0.2, float(request.form.get("denoise") or 0.7))),
-        seed=int(request.form.get("seed") or -1), steps=int(request.form.get("steps") or 28),
-        cfg=float(request.form.get("cfg") or 5.0), width=size[0], height=size[1], n_chars=1,
-        model=request.form.get("model") or (list_checkpoints() or ["novaFurryXL_ilV140.safetensors"])[0],
+        denoise=denoise, seed=int(request.form.get("seed") or -1),
+        width=size[0], height=size[1], n_chars=1, model=model,
         repair_image_png=img_png, repair_mask_png=mask_png,
-        spec={"repair": True, "prompt": prompt}, prompt_used={"positive": prompt, "negative": ""})
+        spec={"repair": True, "prompt": prompt, "denoise": denoise, "source": f.filename or "",
+              "background": "#%02x%02x%02x" % (bg or repair.GREY)},
+        prompt_used={"positive": prompt, "negative": ""})
+    j.update(_repair_job_defaults(request.form, model))
     try:
         jid = comfy.start(j, GALLERY_DIR)
     except Exception as exc:  # noqa: BLE001
@@ -739,17 +770,25 @@ def api_regenerate():
         img = Image.open(f.stream).convert("RGBA")
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": f"bad image: {exc}"}), 400
-    img_png, _, size = repair.prepare(img, Image.new("L", img.size, 0))
+    bg, bg_err = _parse_background(request.form.get("background"))
+    if bg_err:
+        return jsonify({"error": bg_err}), 400
+    model = request.form.get("model") or (list_checkpoints() or ["novaFurryXL_ilV140.safetensors"])[0]
+    img_png, _, size = repair.prepare(img, Image.new("L", img.size, 0), snap=16 if comfy.is_krea2(model) else 8,
+                                      background=bg or repair.GREY)
+    denoise = min(1.0, max(0.3, float(request.form.get("denoise") or 0.65)))
     j = dict(_DEFAULTS)
     j.update(
         positive=prompt, negative=(request.form.get("negative") or "").strip(),
-        denoise=min(1.0, max(0.3, float(request.form.get("denoise") or 0.65))),
-        pose=request.form.get("pose", "1") not in ("0", "false", ""),
-        seed=int(request.form.get("seed") or -1), steps=int(request.form.get("steps") or 28),
-        cfg=float(request.form.get("cfg") or 5.0), width=size[0], height=size[1], n_chars=1,
-        model=request.form.get("model") or (list_checkpoints() or ["novaFurryXL_ilV140.safetensors"])[0],
-        repair_image_png=img_png, spec={"regenerate": True, "prompt": prompt},
+        denoise=denoise, pose=request.form.get("pose", "1") not in ("0", "false", ""),
+        seed=int(request.form.get("seed") or -1), width=size[0], height=size[1], n_chars=1, model=model,
+        repair_image_png=img_png,
+        spec={"regenerate": True, "prompt": prompt, "denoise": denoise, "source": f.filename or "",
+              "background": "#%02x%02x%02x" % (bg or repair.GREY)},
         prompt_used={"positive": prompt, "negative": ""})
+    j.update(_repair_job_defaults(request.form, model))
+    if comfy.is_krea2(model):
+        j["pose"] = False
     try:
         jid = comfy.start(j, GALLERY_DIR)
     except Exception as exc:  # noqa: BLE001
