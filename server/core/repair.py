@@ -13,22 +13,23 @@ WORK = 1024          # long side sent to the model
 GREY = (128, 128, 128)
 
 
-def _snap(n):
-    return max(64, int(round(n / 8.0)) * 8)
+def _snap(n, step=8):
+    return max(64, int(round(n / float(step))) * step)
 
 
-def work_size(w, h, work=WORK):
+def work_size(w, h, work=WORK, snap=8):
     s = work / float(max(w, h))
-    return _snap(w * s), _snap(h * s)
+    return _snap(w * s, snap), _snap(h * s, snap)
 
 
-def prepare(img, mask, work=WORK):
-    """img RGBA/RGB, mask L (255 = repaint). Returns (rgb_png, mask_png, (w, h) sent)."""
+def prepare(img, mask, work=WORK, snap=8, background=GREY):
+    """img RGBA/RGB, mask L (255 = repaint). Returns (rgb_png, mask_png, (w, h) sent).
+    `snap` rounds the sent size to a multiple of it (8 for SDXL, 16 for Krea 2); `background` is the RGB colour transparent pixels are flattened onto."""
     img = img.convert("RGBA")
     mask = mask.convert("L").resize(img.size)
-    flat = Image.new("RGB", img.size, GREY)
+    flat = Image.new("RGB", img.size, tuple(background))
     flat.paste(img.convert("RGB"), mask=img.getchannel("A"))
-    size = work_size(*img.size, work=work)
+    size = work_size(*img.size, work=work, snap=snap)
     out = []
     for im, mode in ((flat, Image.LANCZOS), (mask, Image.BILINEAR)):
         buf = io.BytesIO()

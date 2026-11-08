@@ -307,6 +307,39 @@ def round_krea2_size(width, height):
     return width, height, None
 
 
+def _krea2_loaders(job):
+    """The Krea 2 loader nodes shared by the text-to-image and image-to-image graphs: UNET (1), Qwen3-VL text encoder (2), VAE (3)."""
+    return {
+        "1": {"class_type": "UNETLoader",
+              "inputs": {"unet_name": str(job["model"])[len(KREA2_PREFIX):], "weight_dtype": "default"}},
+        "2": {"class_type": "CLIPLoader",
+              "inputs": {"clip_name": os.environ.get("PROMPTFORGE_KREA2_TE", KREA2_TE), "type": "krea2", "device": "default"}},
+        "3": {"class_type": "VAELoader",
+              "inputs": {"vae_name": os.environ.get("PROMPTFORGE_KREA2_VAE", KREA2_VAE)}},
+    }
+
+
+def _krea2_chain_loras(graph, job):
+    """Chain LoraLoader nodes (ids 100+) after the UNET/CLIP loaders when the job has `loras`; returns the final (model_ref, clip_ref)."""
+    model_ref = ["1", 0]  # UNETLoader output
+    clip_ref = ["2", 0]   # CLIPLoader output
+    for i, lora in enumerate(job.get("loras") or []):
+        lora_id = str(100 + i)  # IDs starting at 100 avoid conflicts
+        graph[lora_id] = {
+            "class_type": "LoraLoader",
+            "inputs": {
+                "model": model_ref,
+                "clip": clip_ref,
+                "lora_name": lora["name"],
+                "strength_model": lora.get("weight", 1.0),
+                "strength_clip": lora.get("weight", 1.0)
+            }
+        }
+        model_ref = [lora_id, 0]
+        clip_ref = [lora_id, 1]
+    return model_ref, clip_ref
+
+
 def build_krea2_graph(job):
     """The official Comfy-Org Krea-2 Turbo text-to-image graph: UNET + Qwen3-VL CLIP (type krea2) + VAE, the positive encoded once and a
     zeroed copy of it as the negative, one KSampler (8 steps, cfg 1, euler/simple), decode, save.
@@ -315,42 +348,12 @@ def build_krea2_graph(job):
     positive = (job.get("positive") or "").strip() or ". ".join(
         t for t in (job.get("base"), job.get("region_a"), job.get("region_b")) if t)
     
-    # Start with base graph
-    graph = {
-        "1": {"class_type": "UNETLoader",
-              "inputs": {"unet_name": str(job["model"])[len(KREA2_PREFIX):], "weight_dtype": "default"}},
-        "2": {"class_type": "CLIPLoader",
-              "inputs": {"clip_name": os.environ.get("PROMPTFORGE_KREA2_TE", KREA2_TE), "type": "krea2", "device": "default"}},
-        "3": {"class_type": "VAELoader",
-              "inputs": {"vae_name": os.environ.get("PROMPTFORGE_KREA2_VAE", KREA2_VAE)}},
-        "6": {"class_type": "CLIPTextEncode", "inputs": {"text": positive, "clip": ["2", 0]}},
-        "7": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["6", 0]}},
-        "10": {"class_type": "EmptyLatentImage",
-               "inputs": {"width": int(job["width"]), "height": int(job["height"]), "batch_size": int(job["batch"])}},
-    }
-    
-    # Chain LoRAs if present
-    loras = job.get("loras")
-    if loras:
-        model_ref = ["1", 0]  # UNETLoader output
-        clip_ref = ["2", 0]   # CLIPLoader output
-        for i, lora in enumerate(loras):
-            lora_id = str(100 + i)  # Use IDs starting at 100 to avoid conflicts
-            graph[lora_id] = {
-                "class_type": "LoraLoader",
-                "inputs": {
-                    "model": model_ref,
-                    "clip": clip_ref,
-                    "lora_name": lora["name"],
-                    "strength_model": lora.get("weight", 1.0),
-                    "strength_clip": lora.get("weight", 1.0)
-                }
-            }
-            model_ref = [lora_id, 0]
-            clip_ref = [lora_id, 1]
-    else:
-        model_ref = ["1", 0]
-        clip_ref = ["2", 0]
+    graph = _krea2_loaders(job)
+    graph["6"] = {"class_type": "CLIPTextEncode", "inputs": {"text": positive, "clip": ["2", 0]}}
+    graph["7"] = {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["6", 0]}}
+    graph["10"] = {"class_type": "EmptyLatentImage",
+                   "inputs": {"width": int(job["width"]), "height": int(job["height"]), "batch_size": int(job["batch"])}}
+    model_ref, clip_ref = _krea2_chain_loras(graph, job)
     
     # Update CLIPTextEncode and ConditioningZeroOut to use the final clip reference
     graph["6"]["inputs"]["clip"] = clip_ref
@@ -367,12 +370,43 @@ def build_krea2_graph(job):
     return graph
 
 
+def build_krea2_repair_graph(job):
+    """Krea 2 image-to-image from a picture already uploaded to ComfyUI (`image_name`): LoadImage -> VAEEncode -> KSampler at the job's
+    denoise. With `mask_name` (white = repaint) only that area is redone, through the same GrowMask / SetLatentNoiseMask nodes (ids 21/22/24)
+    the SDXL repair graph uses. There is no ControlNet for Krea 2 here, so `pose` is never wired."""
+    graph = _krea2_loaders(job)
+    positive = (job.get("positive") or "").strip()
+    graph["20"] = {"class_type": "LoadImage", "inputs": {"image": job["image_name"]}}
+    graph["23"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["20", 0], "vae": ["3", 0]}}
+    graph["6"] = {"class_type": "CLIPTextEncode", "inputs": {"text": positive, "clip": ["2", 0]}}
+    graph["7"] = {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["6", 0]}}
+    model_ref, clip_ref = _krea2_chain_loras(graph, job)
+    graph["6"]["inputs"]["clip"] = clip_ref
+    latent = ["23", 0]
+    if job.get("mask_name"):
+        graph["21"] = {"class_type": "LoadImageMask", "inputs": {"image": job["mask_name"], "channel": "red"}}
+        graph["22"] = {"class_type": "GrowMask", "inputs": {"mask": ["21", 0], "expand": int(job.get("grow", 6)),
+                                                              "tapered_corners": True}}
+        graph["24"] = {"class_type": "SetLatentNoiseMask", "inputs": {"samples": ["23", 0], "mask": ["22", 0]}}
+        latent = ["24", 0]
+    graph["11"] = {"class_type": "KSampler", "inputs": {
+        "seed": int(job["seed"]), "steps": int(job["steps"]), "cfg": float(job["cfg"]),
+        "sampler_name": job["sampler"], "scheduler": job["scheduler"], "denoise": float(job["denoise"]),
+        "model": model_ref, "positive": ["6", 0], "negative": ["7", 0], "latent_image": latent}}
+    graph["12"] = {"class_type": "VAEDecode", "inputs": {"samples": ["11", 0], "vae": ["3", 0]}}
+    graph["13"] = {"class_type": "SaveImage",
+                   "inputs": {"filename_prefix": f"promptforge_repair_{job['id'][:8]}", "images": ["12", 0]}}
+    return graph
+
+
 def build_repair_graph(job):
     """Image-to-image from a picture already uploaded to ComfyUI (`image_name`).
 
     With `mask_name` (white = repaint, grown a little) only that area is redone: an inpaint. Without it the whole
     picture is regenerated at `denoise`, the sprite acting as the reference. With `pose` the picture's OpenPose
     skeleton is extracted and fed to the openpose ControlNet, which holds the pose so denoise can go higher."""
+    if is_krea2(job.get("model")):
+        return build_krea2_repair_graph(job)
     prefix = f"promptforge_repair_{job['id'][:8]}"
     g = {
         "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": job["model"]}},
