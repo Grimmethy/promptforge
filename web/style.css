@@ -108,13 +108,18 @@ details.presetEd textarea.yaml { width: 100%; margin: 6px 0; font: 11px/1.4 ui-m
 /* gallery */
 #gallery { flex: 1; overflow-y: auto; padding: 14px;
            display: grid; grid-template-columns: repeat(auto-fill, 200px);
-           grid-auto-rows: 200px; gap: 10px;
+           grid-auto-rows: min-content; align-items: start; gap: 10px;     /* a tile is as tall as its picture: nothing is cropped
+                                                                              (min-content, not auto: with auto the phone's 1fr columns gave rows
+                                                                              shorter than their tiles and the tiles overlapped) */
            justify-content: center; align-content: start; }
 .tile { position: relative; border: 1px solid var(--border); border-radius: 7px;
         overflow: hidden; background: var(--panel);
         display: flex; align-items: center; justify-content: center; }
-.tile img { width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; display: block;
+.tile img { width: 100%; height: auto; object-fit: contain; cursor: zoom-in; display: block;
             opacity: 1; transition: opacity .2s; }
+/* a tile with no picture yet (still loading, or a running job) gets the usual portrait shape so the grid neither collapses nor jumps;
+   once the picture is in, the 'loading' class goes away and the tile takes the picture's own shape */
+.tile.loading, .tile[data-job] { aspect-ratio: 2 / 3; }
 /* shimmering skeleton: page-load placeholders (.skel) and each tile until its img decodes (.loading) */
 @keyframes pf-shimmer { to { background-position: -200% 0; } }
 .tile.skel, .tile.loading::before {
@@ -166,7 +171,7 @@ details.presetEd textarea.yaml { width: 100%; margin: 6px 0; font: 11px/1.4 ui-m
 @media (max-width: 860px) {
   body { flex-direction: column; height: 100dvh; }
   #inputs { width: 100%; min-width: 0; border-right: none; flex: 1; min-height: 0; }
-  #gallery { flex: 1; min-height: 0; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); grid-auto-rows: 140px; }
+  #gallery { flex: 1; min-height: 0; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); grid-auto-rows: min-content; align-items: start; }
   body.view-gallery #inputs { display: none; }
   body:not(.view-gallery) #gallery { display: none; }
   #viewBar { display: flex; order: -1; flex: none; height: 46px; background: var(--panel2); border-bottom: 2px solid var(--border); }
