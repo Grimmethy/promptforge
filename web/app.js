@@ -760,8 +760,14 @@ async function pollJob(jid, tile, meta) {
     }
     if (j.status === 'error') { tile.querySelector('.spin').textContent = '⚠ ' + (j.error || 'error'); return; }
     if (j.status === 'done') {
-      // a regenerate job has no form spec to carry: let the tile fetch the real sidecar lazily instead
-      tile.replaceWith(...j.images.map(f => imgTile(f, meta.lazy ? null : { ...meta, seed: j.seed, spec: buildSpec(), prompt_used: j.prompt_used })));
+      // The gallery-new push usually lands before this poll sees 'done' and has already put a tile (and counted it) on the page:
+      // only files without a tile get one here, and if there are none the running placeholder just goes away.
+      const fresh = PFTileDedupe.freshFiles(_shown, j.images);
+      if (fresh.length) {
+        // a regenerate job has no form spec to carry: let the tile fetch the real sidecar lazily instead
+        tile.replaceWith(...fresh.map(f => imgTile(f, meta.lazy ? null : { ...meta, seed: j.seed, spec: buildSpec(), prompt_used: j.prompt_used })));
+        _galOffset += fresh.length; _galTotal += fresh.length;   // same counting addNewTiles does, so infinite scroll stays in step
+      } else tile.remove();
       return;
     }
   }
@@ -897,7 +903,7 @@ async function loadGallery(reset = true) {
 // ---- live gallery: the server pushes finished and deleted images, so no refresh and no polling ----
 function addNewTiles(files) {
   const g = $('#gallery');
-  const fresh = files.filter(f => !_shown.has(f));
+  const fresh = PFTileDedupe.freshFiles(_shown, files);
   if (!fresh.length) return;
   for (const f of fresh.slice().reverse()) g.prepend(imgTile(f));   // keep the batch's own order, newest group first
   _galOffset += fresh.length; _galTotal += fresh.length;
