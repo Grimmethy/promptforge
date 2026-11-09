@@ -141,6 +141,18 @@ details.presetEd textarea.yaml { width: 100%; margin: 6px 0; font: 11px/1.4 ui-m
 #lightbox pre { white-space: pre-wrap; background: var(--panel); padding: 10px;
                 border-radius: 6px; }
 
+/* regenerate-from-image panel: same overlay pattern as the lightbox */
+#regenPanel { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none;
+              align-items: center; justify-content: center; z-index: 55; padding: 20px; overflow: auto; }
+#regenPanel.on { display: flex; }
+#regenPanel .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+                    padding: 14px; width: min(460px, 100%); max-height: 100%; overflow: auto; }
+#regenPanel h3 { margin: 0 0 8px; font-size: 14px; }
+#regenPanel img { display: block; max-width: 100%; max-height: 220px; margin: 0 auto 6px; border-radius: 6px; }
+#regenPanel .hint { font-size: 11px; color: var(--muted); margin: 2px 0 4px; }
+#regenPanel .row { display: flex; gap: 8px; margin-top: 12px; }
+#regenPanel input[type=range] { width: 100%; }
+
 #toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
          background: var(--panel2); border: 1px solid var(--border); border-radius: 6px;
          padding: 8px 14px; z-index: 60; display: none; }
@@ -163,4 +175,6 @@ details.presetEd textarea.yaml { width: 100%; margin: 6px 0; font: 11px/1.4 ui-m
   #lightbox { flex-direction: column; padding: 12px; overflow: auto; justify-content: flex-start; }
   #lightbox img { max-width: 100%; max-height: 60vh; }
   #lightbox .info { max-width: 100%; margin: 12px 0 0; max-height: none; }
+  #regenPanel { padding: 8px; align-items: flex-start; }
+  #regenPanel .card { width: 100%; }
 }

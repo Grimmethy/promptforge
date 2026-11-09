@@ -758,17 +758,28 @@ def api_repair():
 @app.route("/api/regenerate", methods=["POST"])
 def api_regenerate():
     """Redraw a whole character using the picture as the reference. multipart: image (PNG; transparency is
-    flattened onto grey), prompt, negative, denoise (0.3-1.0, default 0.65), pose (1 = hold the pose with the
-    openpose ControlNet, default 1), seed, model, steps, cfg. Returns {job_id}; poll /api/job/<id>, then GET
-    /api/regenerate/<id>/result.png."""
+    flattened onto grey) OR from_gallery (a gallery relpath such as 2026-11/abcd1234_0.png, read from the
+    gallery on the server; an uploaded image wins when both are sent), prompt, negative, denoise (0.3-1.0,
+    default 0.65), pose (1 = hold the pose with the openpose ControlNet, default 1), seed, model, steps, cfg.
+    Returns {job_id}; poll /api/job/<id>, then GET /api/regenerate/<id>/result.png."""
     from PIL import Image
     from core import repair
     f = request.files.get("image")
+    from_gallery = (request.form.get("from_gallery") or "").strip()
     prompt = (request.form.get("prompt") or "").strip()
-    if not f or not prompt:
-        return jsonify({"error": "image and prompt are required"}), 400
+    if not (f or from_gallery) or not prompt:
+        return jsonify({"error": "image (or from_gallery) and prompt are required"}), 400
+    if f:
+        stream, source = f.stream, f.filename or ""
+    else:
+        gp = _safe_gallery_path(from_gallery)
+        if gp is None:
+            return jsonify({"error": "from_gallery must be a file inside the gallery"}), 400
+        if not os.path.isfile(gp):
+            return jsonify({"error": "gallery image not found"}), 400
+        stream, source = gp, from_gallery
     try:
-        img = Image.open(f.stream).convert("RGBA")
+        img = Image.open(stream).convert("RGBA")
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": f"bad image: {exc}"}), 400
     bg, bg_err = _parse_background(request.form.get("background"))
@@ -784,7 +795,7 @@ def api_regenerate():
         denoise=denoise, pose=request.form.get("pose", "1") not in ("0", "false", ""),
         seed=int(request.form.get("seed") or -1), width=size[0], height=size[1], n_chars=1, model=model,
         repair_image_png=img_png,
-        spec={"regenerate": True, "prompt": prompt, "denoise": denoise, "source": f.filename or "",
+        spec={"regenerate": True, "prompt": prompt, "denoise": denoise, "source": source,
               "background": "#%02x%02x%02x" % (bg or repair.GREY)},
         prompt_used={"positive": prompt, "negative": ""})
     j.update(_repair_job_defaults(request.form, model))

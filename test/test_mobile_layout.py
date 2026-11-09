@@ -82,6 +82,18 @@ class MobileLayoutTest(unittest.TestCase):
         self.assertRegex(rule(phone, "#lightbox") or "", r"flex-direction:\s*column")
         self.assertRegex(rule(phone, "#lightbox .info") or "", r"max-width:\s*100%")
 
+    def test_the_regenerate_panel_exists_and_fills_the_screen_width_on_a_phone(self):
+        html, js, css = read("index.html"), read("app.js"), read("style.css")
+        for need in ('id="regenPanel"', 'id="regenPrompt"', 'id="regenDenoise"', 'id="regenModel"', 'id="regenRun"'):
+            self.assertIn(need, html)
+        self.assertRegex(html, r'id="regenDenoise"[^>]*min="0.3"[^>]*max="1"[^>]*step="0.05"')
+        self.assertIn("from_gallery", js)                  # the picture is read on the server, not uploaded by the page
+        self.assertIn("/api/regenerate", js)
+        self.assertRegex(rule(media_block(css), "#regenPanel .card") or "", r"width:\s*100%")
+        start = js.index("// ---- regenerate from a gallery image")
+        block = js[start:js.index("// ---- paged gallery", start)]
+        self.assertNotRegex(block, r"setInterval|setTimeout")   # the panel adds no timers
+
 
 if __name__ == "__main__":
     unittest.main()

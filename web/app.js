@@ -746,7 +746,8 @@ async function pollJob(jid, tile, meta) {
     }
     if (j.status === 'error') { tile.querySelector('.spin').textContent = '⚠ ' + (j.error || 'error'); return; }
     if (j.status === 'done') {
-      tile.replaceWith(...j.images.map(f => imgTile(f, { ...meta, seed: j.seed, spec: buildSpec(), prompt_used: j.prompt_used })));
+      // a regenerate job has no form spec to carry: let the tile fetch the real sidecar lazily instead
+      tile.replaceWith(...j.images.map(f => imgTile(f, meta.lazy ? null : { ...meta, seed: j.seed, spec: buildSpec(), prompt_used: j.prompt_used })));
       return;
     }
   }
@@ -762,6 +763,7 @@ function imgTile(file, meta = null) {
   const getMeta = async () => _m || (_m = await fetch('/api/gallery-meta/' + file).then(r => r.json()).catch(() => ({})));
   const menu = el('div', { class: 'menu row' }, [
     mBtn('♻', 'reuse settings', async () => { const m = await getMeta(); if (m.spec) applySpec(m.spec); }),
+    mBtn('🎨', 'regenerate from this image', async () => openRegen(file, await getMeta())),
     mBtn('⧉', 'copy prompt', async () => { const m = await getMeta(); navigator.clipboard.writeText(JSON.stringify(m.prompt_used || {}, null, 1)); toast('prompt copied'); }),
     mBtn('🦴', 'send pose to editor', async () => {
       const rigs = (await getMeta()).spec?.pose_rigs;
@@ -785,11 +787,61 @@ function openLB(file, meta) {
   const p = (meta || {}).prompt_used || {};
   $('#lbInfo').append(
     el('div', {}, `seed ${meta?.seed ?? '?'} · ${meta?.model || ''}`),
+    el('button', { class: 'x', onclick: () => { $('#lightbox').classList.remove('on'); openRegen(file, meta); } }, '🎨 Regenerate from this image'),
     el('pre', { html: (p.positive || [p.region_a, p.region_b, p.base].filter(Boolean).join('\n\nBREAK\n')) || '' }),
     el('pre', { html: p.negative || '' }));
   $('#lightbox').classList.add('on');
 }
 $('#lightbox').onclick = e => { if (e.target.id === 'lightbox') e.currentTarget.classList.remove('on'); };
+
+// ---- regenerate from a gallery image (image-to-image through /api/regenerate, the picture is read on the server) ----
+let _regenFile = null;
+function openRegen(file, meta) {
+  _regenFile = file;
+  const m = meta || {};
+  const p = m.prompt_used || {};
+  $('#regenImg').src = '/api/image/' + file;
+  $('#regenPrompt').value = p.positive || [p.region_a, p.region_b, p.base].filter(Boolean).join('\n') || '';
+  const sel = $('#regenModel');
+  sel.innerHTML = '';
+  for (const o of $('#model').options) sel.append(el('option', { value: o.value }, o.textContent));
+  const wanted = m.model || m.spec?.model;
+  const mainModel = $('#model').value;
+  sel.value = [...sel.options].some(o => o.value === wanted) ? wanted : (mainModel.startsWith('(') ? '' : mainModel);
+  $('#regenDenoise').value = '0.65'; $('#regenDenoiseVal').textContent = '0.65';
+  $('#regenBg').value = ''; $('#regenSeed').value = '-1';
+  $('#regenPanel').classList.add('on');
+  $('#regenPrompt').focus();
+}
+function closeRegen() { $('#regenPanel').classList.remove('on'); _regenFile = null; }
+async function runRegen() {
+  const prompt = $('#regenPrompt').value.trim();
+  if (!_regenFile) return;
+  if (!prompt) { toast('write a prompt first'); return; }
+  const fd = new FormData();
+  fd.append('from_gallery', _regenFile);
+  fd.append('prompt', prompt);
+  fd.append('denoise', $('#regenDenoise').value);
+  fd.append('seed', $('#regenSeed').value || '-1');
+  if ($('#regenModel').value) fd.append('model', $('#regenModel').value);
+  if ($('#regenBg').value.trim()) fd.append('background', $('#regenBg').value.trim());
+  const btn = $('#regenRun'); btn.disabled = true;
+  try {
+    const r = await fetch('/api/regenerate', { method: 'POST', body: fd }).then(r => r.json());
+    if (r.error) { toast(r.error); return; }
+    const tile = runningTile(r.job_id);
+    $('#gallery').prepend(tile);
+    pollJob(r.job_id, tile, { ...r, lazy: true });
+    closeRegen();
+    toast('regenerating…');
+  } catch (e) { toast('regenerate failed: ' + e); }
+  finally { btn.disabled = false; }
+}
+$('#regenRun').onclick = runRegen;
+$('#regenCancel').onclick = closeRegen;
+$('#regenDenoise').oninput = e => { $('#regenDenoiseVal').textContent = Number(e.target.value).toFixed(2); };
+$('#regenPanel').onclick = e => { if (e.target.id === 'regenPanel') closeRegen(); };
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#regenPanel').classList.contains('on')) closeRegen(); });
 
 // ---- paged gallery with a shimmering skeleton loader ----
 let _galOffset = 0, _galTotal = 0, _galLoading = false;
