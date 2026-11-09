@@ -791,7 +791,7 @@ function imgTile(file, meta = null) {
       else toast('no rig saved for this image');
     }),
     mBtn('⬇', 'download', () => { const a = el('a', { href: '/api/image/' + file, download: file.split('/').pop() }); a.click(); }),
-    mBtn('🗑', 'delete', async () => { await fetch('/api/image/' + file, { method: 'DELETE' }); _shown.delete(file); tile.remove(); _galOffset = Math.max(0, _galOffset - 1); _galTotal = Math.max(0, _galTotal - 1); }),
+    mBtn('🗑', 'delete', async () => { await fetch('/api/image/' + file, { method: 'DELETE' }); dropTiles(file); }),
   ]);
   const img = el('img', { src: '/api/thumb/' + file, loading: 'lazy', onclick: async () => openLB(file, await getMeta()) });
   const done = () => tile.classList.remove('loading');
@@ -909,6 +909,16 @@ function addNewTiles(files) {
   _galOffset += fresh.length; _galTotal += fresh.length;
 }
 
+// Takes a deleted file off the page and keeps the paging counters in step. The delete button and the gallery-removed push both call it
+// (the server publishes the event before it answers the DELETE, so the push usually lands first): only tiles that are really removed are
+// counted, so the second call for the same file finds nothing and changes nothing.
+function dropTiles(file) {
+  _shown.delete(file);
+  const gone = $$('#gallery .tile').filter(n => n.dataset.file === file);
+  gone.forEach(n => n.remove());
+  _galOffset = Math.max(0, _galOffset - gone.length); _galTotal = Math.max(0, _galTotal - gone.length);
+}
+
 async function reconcileGallery() {   // once after a dropped stream comes back: pick up anything missed meanwhile
   const r = await fetch(`/api/gallery?offset=0&limit=${_GAL_PAGE}`).then(r => r.json()).catch(() => null);
   if (r && r.items) addNewTiles(r.items.map(it => it.file));
@@ -923,13 +933,7 @@ function connectEvents() {
     if (d.nsfw && !$('#nsfw').checked) return;
     addNewTiles(d.images || []);
   });
-  es.addEventListener('gallery-removed', e => {
-    const f = JSON.parse(e.data).file;
-    _shown.delete(f);
-    const gone = $$('#gallery .tile').filter(n => n.dataset.file === f);
-    gone.forEach(n => n.remove());
-    _galOffset = Math.max(0, _galOffset - gone.length); _galTotal = Math.max(0, _galTotal - gone.length);   // keep paging in step
-  });
+  es.addEventListener('gallery-removed', e => dropTiles(JSON.parse(e.data).file));
   es.onerror = () => { dropped = true; };      // EventSource reconnects by itself (server sends retry: 3000)
   es.onopen = () => { if (dropped) { dropped = false; reconcileGallery(); } };
 }
