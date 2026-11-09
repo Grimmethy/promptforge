@@ -18,6 +18,17 @@ let PRESETS = null;
 let editor = null;
 let lastLibFrame = null;   // last library pose loaded, for seeding the editor
 
+// ---- sampler fields follow the model family (SDXL numbers would ruin Krea 2 Turbo): the logic lives in model-defaults.js ----
+const _SAMPLER_IDS = ['cfg', 'steps', 'sampler', 'scheduler'];
+let _prevModel = '', _famStash = {};
+const currentSampler = () => Object.fromEntries(_SAMPLER_IDS.map(k => [k, $('#' + k).value]));
+const setSampler = v => { for (const k of _SAMPLER_IDS) $('#' + k).value = v[k]; };
+function onModelChange() {
+  const r = PFModelDefaults.swap(_prevModel, $('#model').value, currentSampler(), _famStash);
+  _famStash = r.stash; _prevModel = $('#model').value;
+  if (r.values) { setSampler(r.values); persist(); schedulePreview(); }
+}
+
 // ------------------------------------------------------------------ boot
 async function boot() {
   PRESETS = await fetch('/api/presets').then(r => r.json());
@@ -51,11 +62,14 @@ async function boot() {
   $('#generate').onclick = generate;
   $('#reroll').onclick = () => { $('#seed').value = -1; generate(); };
   $$('#inputs select, #inputs input, #inputs textarea').forEach(n => n.addEventListener('change', () => { persist(); schedulePreview(); }));
+  $('#model').addEventListener('change', onModelChange);
   $('#theme').addEventListener('change', applyThemeHints);
   $('#nsfw').addEventListener('change', onNsfwToggle);
   installAddBoxes();   // after the blanket change-listener so add-box inputs are excluded
 
   restore();
+  _prevModel = $('#model').value;
+  if (PFModelDefaults.needsKreaFix(_prevModel, currentSampler())) { setSampler(PFModelDefaults.DEFAULTS.krea2); persist(); }   // saved Krea 2 + SDXL numbers
   $('#nsfw').checked = !!PRESETS.nsfw;   // server flag is the source of truth, not localStorage
   renderChars();
   await comfyStatus();
@@ -293,7 +307,7 @@ async function comfyStatus() {
       + (s.lease_held ? ' · holding GPU lease' : '')
       : 'ComfyUI unreachable';
     if (s.up && s.checkpoints?.length && $('#model').options.length && $('#model').value.startsWith('('))
-      fillSelect('#model', s.checkpoints);
+      { fillSelect('#model', s.checkpoints); _prevModel = $('#model').value; }
     renderComfyBtn(s);
   } catch { $('#comfyMsg').textContent = '?'; }
 }
@@ -924,6 +938,7 @@ function applySpec(spec) {
   if (spec.style) $('#styleText').value = spec.style;
   if (spec.setting) $('#settingText').value = spec.setting;
   if (spec.negative) $('#negative').value = spec.negative;
+  _prevModel = $('#model').value;   // the model was set without a change event: keep the family tracker in step (the spec carries its own numbers, so no swap)
   if (spec.layout) $('#layout').value = spec.layout;
   if ($('#poseKeywords')) $('#poseKeywords').value = spec.pose_keywords || '';
   state.poseName = spec.pose_position || null;
