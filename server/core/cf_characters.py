@@ -122,6 +122,11 @@ def list_characters():
     return sorted(slug for slug, c in _index().items() if c["base"])
 
 
+def character_names():
+    """Display names of every listed character (those with a keyword block), for matching gallery images to characters."""
+    return sorted(c["name"] for c in _index().values() if c["base"])
+
+
 def get_character(name):
     """Look up by slug or display name, case-insensitively (older saved shot specs used the
     lowercase preset file stem, e.g. 'cindy' for CharacterForge's 'Cindy'). {} if unknown."""
