@@ -186,3 +186,5 @@ details.presetEd textarea.yaml { width: 100%; margin: 6px 0; font: 11px/1.4 ui-m
   #regenPanel { padding: 8px; align-items: flex-start; }
   #regenPanel .card { width: 100%; }
 }
+
+.tile .lic { position: absolute; left: 4px; top: 4px; font-size: 11px; line-height: 1; padding: 2px 5px; border-radius: 8px; color: #fff; pointer-events: auto; }

@@ -14,7 +14,7 @@ import urllib.request
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from core import (assemble, cf_characters, comfy, comfy_proc, data, events, gallery_chars, gpu_client, gpu_session, pose_ops, randomizer, rig,
+from core import (assemble, cf_characters, comfy, comfy_proc, data, events, gallery_chars, gpu_client, gpu_session, licenses, pose_ops, randomizer, rig,
                   secondbrain, themes, thumbs)
 
 logger = logging.getLogger(__name__)
@@ -235,6 +235,7 @@ def presets():
         cn.append({"name": p, "people": doc.get("people", 1),
                    "tags": doc.get("tags", "")})
 
+    models = list_models()
     return jsonify({
         "nsfw": data.nsfw_enabled(),
         "characters": {"preset": preset_chars, "secondbrain": sb_chars},
@@ -255,7 +256,8 @@ def presets():
             "species": randomizer.species_choices(),
             "outfit_styles": randomizer.style_choices(),
         },
-        "checkpoints": list_models(),
+        "checkpoints": models,
+        "checkpoint_licenses": {m: licenses.lookup(m) for m in models},
         "secondbrain_dir": secondbrain.SB_DIR or None,
     })
 
@@ -937,7 +939,9 @@ def _gallery_info(rel, names):
 def gallery():
     """Newest-first page of gallery image relpaths (no sidecar meta — see /api/gallery-meta), each with the characters it shows
     ([{name, guessed}]). ?offset= &limit= for infinite scroll; ?character=<name or slug> keeps images of that character
-    ("none" = images with no character); ?linked=none|any keeps images without / with links to a character entry."""
+    ("none" = images with no character); ?linked=none|any keeps images without / with links to a character entry; ?commercial=1 keeps only images
+    whose recorded model licence says they may be sold (older images with no record count as unverified and are left out). Each item also carries
+    commercial_use for its badge."""
     if not os.path.isdir(GALLERY_DIR):
         return jsonify({"items": [], "total": 0, "offset": 0, "limit": 0})
     try:
@@ -949,6 +953,9 @@ def gallery():
     names = _gallery_names()
     who = request.args.get("character", "").strip()
     linked = request.args.get("linked", "").strip()
+    only_sellable = request.args.get("commercial", "").strip() == "1"
+    if only_sellable:
+        rows = [(rel, ts) for rel, ts in rows if licenses.sidecar_info(_sidecar_path_for(rel))[0] == "yes"]
     infos = {}
     if who or linked in ("none", "any"):
         keep = []
@@ -963,7 +970,8 @@ def gallery():
         rows = keep
     page = rows[offset:offset + limit]
     return jsonify({
-        "items": [{"file": rel, "ts": ts, "characters": (infos.get(rel) or _gallery_info(rel, names))[0]} for rel, ts in page],
+        "items": [{"file": rel, "ts": ts, "characters": (infos.get(rel) or _gallery_info(rel, names))[0],
+                   "commercial_use": licenses.sidecar_info(_sidecar_path_for(rel))[0]} for rel, ts in page],
         "total": len(rows), "offset": offset, "limit": limit,
     })
 

@@ -1,0 +1,45 @@
+{
+  "_readme": "Per-model licence verdicts for what the shop may SELL. Keys are model file names as ComfyUI lists them (a krea2: prefix is ignored; a * matches any text). commercial_use is yes, conditional, no or unverified. Working reference, not legal advice; the evidence and how to re-check each row live in the styleforge repo, docs/MODEL_LICENSES.md. Subject IP (a character or unit you draw) is separate from the model licence.",
+  "WAI-Nsfw-Illustrious-17.safetensors": {
+    "source_url": "https://civitai.com/models/827184",
+    "licence": "Civitai creator permissions: images may be sold, no credit needed",
+    "commercial_use": "yes",
+    "note": "Illustrious base licence restricts monetising closed-source models you train or merge from it, not the images you generate.",
+    "checked": "2026-11-09"
+  },
+  "novaFurryXL_ilV140.safetensors": {
+    "source_url": "https://civitai.com/models/503815",
+    "licence": "Civitai creator permissions: images may be sold, no credit needed",
+    "commercial_use": "yes",
+    "note": "A merge on the Illustrious base; same base-licence note as WAI.",
+    "checked": "2026-11-09"
+  },
+  "divingIllustrious_nijiMutedColorVAE.safetensors": {
+    "source_url": null,
+    "licence": null,
+    "commercial_use": "unverified",
+    "note": "A merge of several third-party models and no source page was found. Keep it out of anything that is sold until it is checked by hand.",
+    "checked": "2026-11-09"
+  },
+  "krea2_turbo_int8_convrot.safetensors": {
+    "source_url": "https://krea.ai/krea-2-licensing",
+    "licence": "Krea 2 Community License",
+    "commercial_use": "conditional",
+    "note": "Allowed while trailing-12-month revenue is under USD 1M; other terms (seat limit, content filtering) are unconfirmed and this is a third-party int8 quantization whose own licence is unchecked.",
+    "checked": "2026-11-09"
+  },
+  "wan2.2_*": {
+    "source_url": "https://github.com/Wan-Video/Wan2.2",
+    "licence": "Apache-2.0 (reported)",
+    "commercial_use": "conditional",
+    "note": "Weights are reported Apache-2.0; the wording on who owns outputs is not confirmed. Read the official LICENSE before selling video.",
+    "checked": "2026-11-09"
+  },
+  "wan2.1_fun_inp_1.3B*": {
+    "source_url": "https://github.com/Wan-Video/Wan2.1",
+    "licence": "Apache-2.0 (reported)",
+    "commercial_use": "conditional",
+    "note": "Weights are reported Apache-2.0; the wording on who owns outputs is not confirmed.",
+    "checked": "2026-11-09"
+  }
+}
