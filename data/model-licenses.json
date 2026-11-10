@@ -1,0 +1,37 @@
+{
+  "novaFurryXL_ilV140.safetensors": {
+    "source_url": "https://civitai.com/models/1182090",
+    "licence": "Civitai Community License",
+    "commercial_use": "no",
+    "note": "Civitai-hosted SDXL checkpoint; non-commercial per model page terms.",
+    "checked": "2026-10-20"
+  },
+  "krea2_turbo_int8_convrot.safetensors": {
+    "source_url": "https://huggingface.co/Comfy-Org/Krea-2",
+    "licence": "krea-2-community-license",
+    "commercial_use": "conditional",
+    "note": "HuggingFace repo tagged krea-2-community-license; read repo terms before commercial use.",
+    "checked": "2026-10-20"
+  },
+  "qwen3vl_4b_fp8_scaled.safetensors": {
+    "source_url": "https://huggingface.co/Comfy-Org/Krea-2",
+    "licence": "krea-2-community-license",
+    "commercial_use": "conditional",
+    "note": "Krea 2 text encoder; same license as the diffusion model repo.",
+    "checked": "2026-10-20"
+  },
+  "qwen_image_vae.safetensors": {
+    "source_url": "https://huggingface.co/Comfy-Org/Krea-2",
+    "licence": "krea-2-community-license",
+    "commercial_use": "conditional",
+    "note": "Krea 2 VAE; same license as the diffusion model repo.",
+    "checked": "2026-10-20"
+  },
+  "controlnet-openpose-sdxl-1.0.safetensors": {
+    "source_url": "https://huggingface.co/lllyasviel/control_v11p_sd15_openpose",
+    "licence": "Apache-2.0",
+    "commercial_use": "yes",
+    "note": "OpenPose ControlNet for SDXL; Apache 2.0 allows commercial use.",
+    "checked": "2026-10-20"
+  }
+}
