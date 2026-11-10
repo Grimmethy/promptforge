@@ -636,11 +636,7 @@ def _run(job, rec, gallery_dir):
                         logger.warning("job %s: thumbnail generation failed for %s",
                                       job["id"], rel, exc_info=True)
             if saved:
-                sidecar = {"id": job["id"], "seed": job["seed"],
-                           "model": job["model"], "spec": job.get("spec"),
-                           "prompt_used": job.get("prompt_used"),
-                           "nsfw": bool(job.get("nsfw")),
-                           "images": saved, "ts": time.time()}
+                sidecar = build_sidecar(job, saved, time.time())
                 with open(os.path.join(outdir, f"{job['id'][:8]}.json"), "w") as fh:
                     json.dump(sidecar, fh, indent=1)
                 try:
@@ -672,3 +668,16 @@ def get_job(jid):
 def any_job_starting_comfyui():
     with _JOBS_LOCK:
         return any(r.get("status") == "starting-comfyui" for r in _JOBS.values())
+
+
+def build_sidecar(job, saved, ts):
+    """The gallery sidecar dict for a finished job. commercial_use and licence are a SNAPSHOT of the model's licence at generation time (never a live reference)."""
+    from . import licenses
+    try:
+        lic = licenses.snapshot(job.get("model"))
+    except Exception:  # noqa: BLE001 - a registry problem must never lose an image
+        lic = {"commercial_use": "unverified", "licence": None}
+    return {"id": job["id"], "seed": job["seed"], "model": job["model"], "spec": job.get("spec"),
+            "prompt_used": job.get("prompt_used"), "nsfw": bool(job.get("nsfw")),
+            "commercial_use": lic["commercial_use"], "licence": lic["licence"],
+            "images": saved, "ts": ts}

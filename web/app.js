@@ -36,6 +36,7 @@ async function boot() {
   fillSelect('#setting', ['none', ...PRESETS.backgrounds.filter(x => x !== 'none')]);
   fillSelect('#style', ['none', ...PRESETS.styles.filter(x => x !== 'none')]);
   fillSelect('#model', PRESETS.checkpoints.length ? PRESETS.checkpoints : ['(ComfyUI down)']);
+  decorateModels();
   refreshPoseLib();
 
   editor = new PoseEditor($('#poseCanvas'), () => {
@@ -84,6 +85,18 @@ function fillSelect(sel, opts, keep) {
   n.innerHTML = '';
   opts.forEach(o => n.append(el('option', {}, o)));
   if (opts.includes(cur)) n.value = cur;
+}
+
+// Put the licence badge on every model option (value stays the bare model name) and the licence text in the tooltip.
+function decorateModels() {
+  const lic = PRESETS?.checkpoint_licenses || {};
+  for (const o of $('#model').options) {
+    const name = o.value;
+    if (name.startsWith('(')) continue;
+    const rec = lic[name];
+    o.value = name; o.textContent = PFLicences.optionText(name, rec); o.title = PFLicences.tooltip(rec);
+    o.style.color = PFLicences.badge(rec?.commercial_use).color;
+  }
 }
 
 // --------------------------------------------------- inline add / edit / delete
@@ -307,7 +320,8 @@ async function comfyStatus() {
       + (s.lease_held ? ' · holding GPU lease' : '')
       : 'ComfyUI unreachable';
     if (s.up && s.checkpoints?.length && $('#model').options.length && $('#model').value.startsWith('('))
-      { fillSelect('#model', s.checkpoints); _prevModel = $('#model').value; }
+      { PRESETS.checkpoint_licenses = (await fetch('/api/presets').then(r => r.json()).catch(() => PRESETS)).checkpoint_licenses || {};
+        fillSelect('#model', s.checkpoints); decorateModels(); _prevModel = $('#model').value; }
     renderComfyBtn(s);
   } catch { $('#comfyMsg').textContent = '?'; }
 }
@@ -777,7 +791,7 @@ async function pollJob(jid, tile, meta) {
 // `meta` may be pre-supplied (fresh generation); otherwise it's fetched from
 // /api/gallery-meta only when a menu action or the lightbox actually needs it.
 const _shown = new Set();   // gallery files that have a tile on the page (so a pushed event never doubles one)
-function imgTile(file, meta = null) {
+function imgTile(file, meta = null, commercial = null) {
   _shown.add(file);
   let _m = meta;
   const getMeta = async () => _m || (_m = await fetch('/api/gallery-meta/' + file).then(r => r.json()).catch(() => ({})));
@@ -796,7 +810,9 @@ function imgTile(file, meta = null) {
   const img = el('img', { src: '/api/thumb/' + file, loading: 'lazy', onclick: async () => openLB(file, await getMeta()) });
   const done = () => tile.classList.remove('loading');
   img.addEventListener('load', done); img.addEventListener('error', done);
-  const tile = el('div', { class: 'tile loading', 'data-file': file }, [img, menu]);
+  const cu = commercial ?? PRESETS?.checkpoint_licenses?.[meta?.model || meta?.spec?.model]?.commercial_use ?? null;
+  const lic = cu ? el('span', { class: 'lic', title: PFLicences.badge(cu).label, style: `background:${PFLicences.badge(cu).color}` }, PFLicences.badge(cu).short) : '';
+  const tile = el('div', { class: 'tile loading', 'data-file': file }, [img, menu, lic]);
   return tile;
 }
 const mBtn = (t, title, fn) => el('button', { class: 'x', title, onclick: fn }, t);
@@ -807,6 +823,7 @@ function openLB(file, meta) {
   const p = (meta || {}).prompt_used || {};
   $('#lbInfo').append(
     el('div', {}, `seed ${meta?.seed ?? '?'} · ${meta?.model || ''}`),
+    meta?.commercial_use ? el('div', { class: 'who', title: meta.licence || '' }, 'Model licence: ' + PFLicences.badge(meta.commercial_use).label + (meta.licence ? ' · ' + meta.licence : '')) : '',
     (meta?.characters || []).length ? el('div', { class: 'who' }, 'Character: ' + meta.characters.map(c => c.name + (c.guessed ? ' (guessed)' : '')).join(', ')) : '',
     el('button', { class: 'x', onclick: () => { $('#lightbox').classList.remove('on'); openRegen(file, meta); } }, '🎨 Regenerate from this image'),
     el('pre', { html: (p.positive || [p.region_a, p.region_b, p.base].filter(Boolean).join('\n\nBREAK\n')) || '' }),
@@ -868,12 +885,13 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#regenP
 let _galOffset = 0, _galTotal = 0, _galLoading = false;
 const _GAL_PAGE = 48;
 let _galObserver = null;
-let _galFilter = { character: '', unassigned: false };   // the toolbar's filter; sent with every page request
-const _galQuery = () => (_galFilter.character ? `&character=${encodeURIComponent(_galFilter.character)}` : '') + (_galFilter.unassigned ? '&linked=none' : '');
+let _galFilter = { character: '', unassigned: false, commercial: false };   // the toolbar's filter; sent with every page request
+const _galQuery = () => (_galFilter.character ? `&character=${encodeURIComponent(_galFilter.character)}` : '') + (_galFilter.unassigned ? '&linked=none' : '') + (_galFilter.commercial ? '&commercial=1' : '');
 // The filter bar is the first row of the grid; loadGallery clears the grid, so the same element is put back each time.
 const galBar = el('div', { id: 'galBar' }, [
   el('select', { id: 'galChar', title: 'Show only the images of one character', onchange: e => { _galFilter.character = e.target.value; loadGallery(); } }, [el('option', { value: '' }, 'All characters')]),
   el('label', { title: 'Hide images already linked to a character entry' }, [el('input', { type: 'checkbox', id: 'galUnassigned', onchange: e => { _galFilter.unassigned = e.target.checked; loadGallery(); } }), ' unassigned only']),
+  el('label', { title: 'Only images whose model licence says they may be sold' }, [el('input', { type: 'checkbox', id: 'galCommercial', onchange: e => { _galFilter.commercial = e.target.checked; loadGallery(); } }), ' commercial-safe only']),
   el('span', { id: 'galCount' }, '')]);
 async function refreshGalleryCharacters() {   // counts for the dropdown: who is in the gallery and how many images each has
   const r = await fetch('/api/gallery-characters').then(r => r.json()).catch(() => null);
@@ -907,7 +925,7 @@ async function loadGallery(reset = true) {
     if (reset) { g.innerHTML = ''; g.append(galBar); }
     $('#galCount').textContent = _galFilter.character || _galFilter.unassigned ? `${r.total || 0} shown` : '';
     const old = $('#gallerySentinel'); if (old) old.remove();
-    (r.items || []).forEach(it => g.append(imgTile(it.file)));
+    (r.items || []).forEach(it => g.append(imgTile(it.file, null, it.commercial_use)));
     _galOffset += (r.items || []).length;
     _galTotal = r.total || _galOffset;
     if (_galOffset < _galTotal) {
