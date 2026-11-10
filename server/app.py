@@ -5,6 +5,7 @@ delegated to ComfyUI (:8188) — see core/comfy.py (added next). Bind 127.0.0.1.
 """
 
 import json
+import math
 import logging
 import os
 import queue
@@ -502,7 +503,25 @@ def _cat_tags(category, value):
     return v
 
 
+MAX_STEPS = 60
+
+
+def check_steps(value):
+    """The optional `steps` field of a generation request: a whole number from 1 to MAX_STEPS (a numeric string such as "30" from a form is fine). Returns it as an int; raises ValueError otherwise."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise ValueError("steps must be a whole number from 1 to %d" % MAX_STEPS)
+    try:
+        n = float(value)
+    except ValueError:
+        raise ValueError("steps must be a whole number from 1 to %d" % MAX_STEPS) from None
+    if not math.isfinite(n) or n != int(n) or not 1 <= n <= MAX_STEPS:
+        raise ValueError("steps must be a whole number from 1 to %d" % MAX_STEPS)
+    return int(n)
+
+
 def resolve_job(spec):
+    if spec.get("steps") is not None:
+        spec = {**spec, "steps": check_steps(spec["steps"])}
     j = dict(_DEFAULTS)
     for k in _DEFAULTS:
         if spec.get(k) is not None:
