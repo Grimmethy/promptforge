@@ -15,8 +15,8 @@ import urllib.request
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from core import (assemble, cf_characters, comfy, comfy_proc, data, events, gallery_chars, gpu_client, gpu_session, licenses, pose_ops, randomizer, rig,
-                  secondbrain, themes, thumbs)
+from core import (assemble, cf_characters, comfy, comfy_proc, data, events, gallery_chars, gpu_client, gpu_session, licenses, link_targets, pose_ops,
+                  randomizer, rig, secondbrain, themes, thumbs)
 
 logger = logging.getLogger(__name__)
 
@@ -954,6 +954,12 @@ def _gallery_info(rel, names):
     return gallery_chars.resolve(raw, names), raw["links"]
 
 
+def _link_badge(rel):
+    """{"name", "role", "more"} for a tile's "-> Name . role" badge (first link plus how many others), or None when the image has no links."""
+    links = gallery_chars.raw_for(_sidecar_path_for(rel))["linkList"]
+    return {"name": links[0]["name"], "role": links[0]["role"], "more": len(links) - 1} if links else None
+
+
 @app.route("/api/gallery")
 def gallery():
     """Newest-first page of gallery image relpaths (no sidecar meta — see /api/gallery-meta), each with the characters it shows
@@ -990,7 +996,7 @@ def gallery():
     page = rows[offset:offset + limit]
     return jsonify({
         "items": [{"file": rel, "ts": ts, "characters": (infos.get(rel) or _gallery_info(rel, names))[0],
-                   "commercial_use": licenses.sidecar_info(_sidecar_path_for(rel))[0]} for rel, ts in page],
+                   "commercial_use": licenses.sidecar_info(_sidecar_path_for(rel))[0], "link": _link_badge(rel)} for rel, ts in page],
         "total": len(rows), "offset": offset, "limit": limit,
     })
 
@@ -1008,6 +1014,70 @@ def gallery_characters():
             row["count"] += 1
             row["guessed"] += 1 if c["guessed"] else 0
     return jsonify({"characters": sorted(counts.values(), key=lambda r: (-r["count"], r["name"].lower())), "none": none, "total": total})
+
+
+def _target_or_404(name):
+    """(base url, error response) for a link target name from PROMPTFORGE_LINK_TARGETS."""
+    base = link_targets.targets().get(name)
+    return (base, None) if base else (None, (jsonify({"error": "unknown link target %r" % name}), 404))
+
+
+@app.route("/api/link-targets")
+def link_targets_list():
+    """Every configured link target with its descriptor and entries (and, with ?file=<gallery relpath>, the entries that image names for certain).
+    An unreachable target is listed with reachable:false and a message instead of failing the whole answer."""
+    out = []
+    meta = None
+    if request.args.get("file"):
+        p = _safe_gallery_path(request.args["file"])
+        sp = _sidecar_path_for(request.args["file"]) if p else None
+        meta = link_targets.read_sidecar(sp) if sp else {}
+        meta["characters"] = gallery_chars.resolve(gallery_chars.raw_for(sp), _gallery_names()) if sp else []
+    for name, base in link_targets.targets().items():
+        try:
+            desc = link_targets.descriptor(base)
+            rows = link_targets.entries(base, desc)
+            out.append({"name": name, "url": base, "reachable": True, "label": desc.get("label") or name, "forge": desc.get("forge") or name,
+                        "roles": desc.get("roles") or [], "categories": desc.get("categories") or [], "max_per_role": desc.get("max_per_role") or 10,
+                        "verdicts": desc.get("verdicts") or [], "entries": rows,
+                        "preselect": link_targets.preselect((meta or {}).get("characters"), rows) if meta else []})
+        except link_targets.TargetUnreachable as e:
+            out.append({"name": name, "url": base, "reachable": False, "error": "%s is not reachable (%s). Start it and try again; the image was not touched." % (name, e)})
+    return jsonify({"targets": out})
+
+
+@app.route("/api/link-targets/<target>/counts/<slug>")
+def link_target_counts(target, slug):
+    """{role: n} of pictures already linked to one entry on the target."""
+    base, err = _target_or_404(target)
+    if err:
+        return err
+    try:
+        return jsonify({"slug": slug, "counts": link_targets.counts(base, link_targets.descriptor(base), slug)})
+    except link_targets.TargetUnreachable as e:
+        return jsonify({"error": "%s is not reachable (%s)" % (target, e)}), 502
+
+
+@app.route("/api/gallery/<path:name>/assign", methods=["POST"])
+def gallery_assign(name):
+    """Copy this gallery image to entries on a link target: {target?, targets:[{slug, role}], tag?, note?, verdict?, replace?:{slug: imageId}, names?:{slug: name}}.
+    Answers {results:[...]} one per target (a 409 role-full carries the target's entries so the page can offer replace); 502 when the target cannot be
+    reached at all. The gallery file is only read."""
+    p = _safe_gallery_path(name)
+    if not p or not os.path.isfile(p) or not p.endswith(".png"):
+        return jsonify({"error": "no such gallery image"}), 404
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or not isinstance(body.get("targets"), list) or not body["targets"]:
+        return jsonify({"error": "targets [{slug, role}] required"}), 400
+    tname = body.get("target") or next(iter(link_targets.targets()), "")
+    base, err = _target_or_404(tname)
+    if err:
+        return err
+    try:
+        results = link_targets.assign(base, name, p, _sidecar_path_for(name), body)
+    except link_targets.TargetUnreachable as e:
+        return jsonify({"error": "%s is not reachable (%s). The image was not touched." % (tname, e), "results": []}), 502
+    return jsonify({"target": tname, "results": results})
 
 
 @app.route("/api/gallery-meta/<path:name>")
