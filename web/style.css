@@ -188,3 +188,19 @@ details.presetEd textarea.yaml { width: 100%; margin: 6px 0; font: 11px/1.4 ui-m
 }
 
 .tile .lic { position: absolute; left: 4px; top: 4px; font-size: 11px; line-height: 1; padding: 2px 5px; border-radius: 8px; color: #fff; pointer-events: auto; }
+
+/* assign-to-character panel (same overlay pattern as the regenerate panel) */
+#assignPanel { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; align-items: center; justify-content: center; z-index: 56; padding: 20px; overflow: auto; }
+#assignPanel.on { display: flex; }
+#assignCard { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px; width: min(520px, 100%); max-height: 100%; overflow: auto; }
+#assignCard h3 { margin: 0 0 8px; font-size: 14px; } #assignCard h4 { margin: 10px 0 4px; font-size: 12px; color: var(--muted); }
+#assignCard > img { display: block; max-height: 120px; margin: 0 auto 6px; border-radius: 6px; }
+#assignCard input, #assignCard select { width: 100%; margin: 3px 0; }
+.asglist { max-height: 260px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; }
+.asggrp > summary { cursor: pointer; font-size: 12px; margin: 4px 0; }
+.asgrow { display: flex; align-items: center; gap: 8px; padding: 2px 0; font-size: 13px; cursor: pointer; }
+#assignCard .asgrow input { width: auto; margin: 0; flex: none; } .asgrow img, .asgrow .nothumb { width: 28px; height: 36px; object-fit: cover; border-radius: 3px; background: var(--border); }
+.asgrow .noimg { font-size: 10px; color: #fff; background: #d68910; border-radius: 8px; padding: 0 6px; }
+.asgres { margin-top: 8px; font-size: 12px; } .asgres .ok { color: #2e9d57; } .asgres .bad { color: #d9534f; } .asgrepl { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0; }
+#assignCard .row { display: flex; gap: 8px; margin-top: 12px; }
+.tile .lnk { position: absolute; left: 4px; bottom: 4px; max-width: calc(100% - 8px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; line-height: 1; padding: 2px 6px; border-radius: 8px; color: #fff; background: #2e7d6b; }

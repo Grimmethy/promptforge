@@ -147,8 +147,8 @@ class CacheTest(unittest.TestCase):
             with open(bad, "w") as fh:
                 fh.write("{not json")
             G.clear()
-            self.assertEqual(G.raw_for(os.path.join(d, "none.json")), {"names": [], "source": "", "links": 0})
-            self.assertEqual(G.raw_for(bad), {"names": [], "source": "", "links": 0})
+            self.assertEqual(G.raw_for(os.path.join(d, "none.json")), {"names": [], "source": "", "links": 0, "linkList": []})
+            self.assertEqual(G.raw_for(bad), {"names": [], "source": "", "links": 0, "linkList": []})
 
 
 if __name__ == "__main__":

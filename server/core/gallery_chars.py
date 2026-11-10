@@ -62,11 +62,12 @@ def resolve(raw, names):
 
 
 def raw_for(sidecar_path):
-    """{"names": [...], "source": str, "links": int} for a sidecar file; empty values when it is missing or unreadable. Cached by mtime."""
+    """{"names": [...], "source": str, "links": int, "linkList": [{"name", "role"}]} for a sidecar file; empty values when it is missing or unreadable.
+    Cached by mtime. linkList feeds the tile badge ("-> Name . role")."""
     try:
         mtime = os.path.getmtime(sidecar_path)
     except OSError:
-        return {"names": [], "source": "", "links": 0}
+        return {"names": [], "source": "", "links": 0, "linkList": []}
     with _lock:
         hit = _cache.get(sidecar_path)
         if hit and hit[0] == mtime:
@@ -81,7 +82,9 @@ def raw_for(sidecar_path):
     chars = spec.get("characters") if isinstance(spec.get("characters"), list) else []
     links = meta.get("links") if isinstance(meta, dict) else None
     raw = {"names": [c.get("name") for c in chars if isinstance(c, dict) and c.get("name")],
-           "source": spec.get("source") or "", "links": len(links) if isinstance(links, list) else 0}
+           "source": spec.get("source") or "", "links": len(links) if isinstance(links, list) else 0,
+           "linkList": [{"name": l.get("name") or l.get("slug") or "", "role": l.get("role") or ""} for l in links if isinstance(l, dict)]
+           if isinstance(links, list) else []}
     with _lock:
         _cache[sidecar_path] = (mtime, raw)
     return raw

@@ -791,7 +791,7 @@ async function pollJob(jid, tile, meta) {
 // `meta` may be pre-supplied (fresh generation); otherwise it's fetched from
 // /api/gallery-meta only when a menu action or the lightbox actually needs it.
 const _shown = new Set();   // gallery files that have a tile on the page (so a pushed event never doubles one)
-function imgTile(file, meta = null, commercial = null) {
+function imgTile(file, meta = null, commercial = null, link = null) {
   _shown.add(file);
   let _m = meta;
   const getMeta = async () => _m || (_m = await fetch('/api/gallery-meta/' + file).then(r => r.json()).catch(() => ({})));
@@ -812,7 +812,9 @@ function imgTile(file, meta = null, commercial = null) {
   img.addEventListener('load', done); img.addEventListener('error', done);
   const cu = commercial ?? PRESETS?.checkpoint_licenses?.[meta?.model || meta?.spec?.model]?.commercial_use ?? null;
   const lic = cu ? el('span', { class: 'lic', title: PFLicences.badge(cu).label, style: `background:${PFLicences.badge(cu).color}` }, PFLicences.badge(cu).short) : '';
-  const tile = el('div', { class: 'tile loading', 'data-file': file }, [img, menu, lic]);
+  const badge = el('span', { class: 'lnk', title: 'Linked to a character entry (see the lightbox)' }, link ? PFAssign.badgeText(link) : '');
+  badge.hidden = !link;
+  const tile = el('div', { class: 'tile loading', 'data-file': file }, [img, menu, lic, badge]);
   return tile;
 }
 const mBtn = (t, title, fn) => el('button', { class: 'x', title, onclick: fn }, t);
@@ -825,12 +827,78 @@ function openLB(file, meta) {
     el('div', {}, `seed ${meta?.seed ?? '?'} · ${meta?.model || ''}`),
     meta?.commercial_use ? el('div', { class: 'who', title: meta.licence || '' }, 'Model licence: ' + PFLicences.badge(meta.commercial_use).label + (meta.licence ? ' · ' + meta.licence : '')) : '',
     (meta?.characters || []).length ? el('div', { class: 'who' }, 'Character: ' + meta.characters.map(c => c.name + (c.guessed ? ' (guessed)' : '')).join(', ')) : '',
+    (meta?.links || []).length ? el('div', { class: 'who' }, 'Linked to: ' + meta.links.map(l => (l.name || l.slug) + ' . ' + l.role).join(', ')) : '',
     el('button', { class: 'x', onclick: () => { $('#lightbox').classList.remove('on'); openRegen(file, meta); } }, '🎨 Regenerate from this image'),
+    el('button', { class: 'x', onclick: () => openAssign(file, meta) }, '➕ Assign to…'),
     el('pre', { html: (p.positive || [p.region_a, p.region_b, p.base].filter(Boolean).join('\n\nBREAK\n')) || '' }),
     el('pre', { html: p.negative || '' }));
   $('#lightbox').classList.add('on');
 }
 $('#lightbox').onclick = e => { if (e.target.id === 'lightbox') e.currentTarget.classList.remove('on'); };
+
+// ---- assign a gallery image to entries in another forge (CharacterForge): the server COPIES it, the gallery keeps its file (assign-model.js) ----
+let _asg = null;   // the open panel's state: {file, target, sel:Set, counts:{slug:{role:n}}, query, results}
+const setTileBadge = (file, links) => {
+  const t = $$('#gallery .tile').find(n => n.dataset.file === file), b = t && t.querySelector('.lnk');
+  if (b) { b.hidden = !links.length; b.textContent = links.length ? PFAssign.badgeText({ name: links[0].name || links[0].slug, role: links[0].role, more: links.length - 1 }) : ''; }
+};
+async function openAssign(file, meta) {
+  $('#lightbox').classList.remove('on');
+  _asg = { file, meta, sel: new Set(), counts: {}, query: '', results: null, replaceFor: {} };
+  $('#assignPanel').classList.add('on');
+  $('#assignCard').replaceChildren(el('p', { class: 'hint' }, 'Loading characters…'));
+  let list;
+  try { list = (await fetch('/api/link-targets?file=' + encodeURIComponent(file)).then(r => r.json())).targets || []; } catch (e) { list = []; }
+  const t = list.find(x => x.reachable);
+  if (!t) {
+    const msg = list.length ? list.map(x => x.error).join(' ') : 'No link target is configured (PROMPTFORGE_LINK_TARGETS). The image was not touched.';
+    $('#assignCard').replaceChildren(el('h3', {}, 'Assign to…'), el('p', {}, msg), el('div', { class: 'row' }, [el('button', { class: 'x', onclick: closeAssign }, 'Close')]));
+    return;
+  }
+  Object.assign(_asg, { target: t, role: (t.roles || [])[0] });
+  (t.preselect || []).forEach(s => _asg.sel.add(s));
+  await refreshCounts(); drawAssign();
+}
+const closeAssign = () => { $('#assignPanel').classList.remove('on'); _asg = null; };
+async function refreshCounts() {
+  await Promise.all([..._asg.sel].filter(s => !_asg.counts[s]).map(async s => {
+    try { _asg.counts[s] = (await fetch(`/api/link-targets/${_asg.target.name}/counts/${encodeURIComponent(s)}`).then(r => r.json())).counts || {}; } catch (e) { _asg.counts[s] = {}; }
+  }));
+}
+function drawAssign() {
+  const a = _asg, t = a.target, secs = PFAssign.groupEntries(t.entries, { preselected: [...a.sel], query: a.query });
+  const row = e => el('label', { class: 'asgrow' }, [
+    el('input', { type: 'checkbox', ...(a.sel.has(e.slug) ? { checked: '' } : {}), onchange: async ev => { ev.target.checked ? a.sel.add(e.slug) : a.sel.delete(e.slug); await refreshCounts(); drawAssign(); } }),
+    e.thumb ? el('img', { src: e.thumb, loading: 'lazy' }) : el('span', { class: 'nothumb' }),
+    el('span', {}, e.name), e.noImage ? el('span', { class: 'noimg' }, 'no image') : '']);
+  const section = s => el('div', { class: 'asgsec' }, [el('h4', {}, `${s.title} (${s.count})`),
+    ...s.groups.map(g => { const d = el('details', { class: 'asggrp' }, [el('summary', {}, `${g.label} (${g.entries.length})`), ...g.entries.map(row)]); d.open = g.open; return d; }),
+    s.count ? '' : el('p', { class: 'hint' }, 'none')]);
+  const opts = PFAssign.roleOptions(t.categories, t.roles, a.counts, [...a.sel], t.max_per_role);
+  const roleSel = el('select', { onchange: ev => { a.role = ev.target.value; } }, opts.map(o => el('option', { value: o.id, ...(o.id === a.role ? { selected: '' } : {}) }, o.text + (o.full ? ' - full' : ''))));
+  const tag = el('input', { placeholder: 'tag (optional)', value: a.tag || '', oninput: ev => { a.tag = ev.target.value; } });
+  const note = el('input', { placeholder: 'note (optional)', value: a.note || '', oninput: ev => { a.note = ev.target.value; } });
+  const search = el('input', { type: 'search', placeholder: 'Search…', value: a.query, oninput: ev => { a.query = ev.target.value; clearTimeout(search._t); search._t = setTimeout(() => { drawAssign(); const s = $('#assignCard input[type=search]'); s.focus(); s.setSelectionRange(s.value.length, s.value.length); }, 200); } });
+  const results = a.results ? el('div', { class: 'asgres' }, a.results.map(r => el('div', { class: r.ok ? 'ok' : 'bad' }, [PFAssign.describeResult(r),
+    ...(r.status === 409 ? [el('div', { class: 'asgrepl' }, (r.entries || []).map(en => el('button', { class: 'x', title: 'Swap this one for the new image; the old file goes to history, nothing is deleted',
+      onclick: () => submitAssign({ replace: { [r.slug]: en.id }, only: r.slug }) }, 'Replace ' + (en.file || en.id))))] : [])]))) : '';
+  $('#assignCard').replaceChildren(el('h3', {}, 'Assign to ' + t.label), el('img', { src: '/api/thumb/' + a.file }),
+    el('p', { class: 'hint' }, 'Copies this image onto each chosen entry; the gallery keeps its file.'), search,
+    el('div', { class: 'asglist' }, secs.map(section)), el('label', { class: 'hint' }, 'Role'), roleSel, tag, note, results,
+    el('div', { class: 'row' }, [el('button', { class: 'x primary', ...(a.sel.size ? {} : { disabled: '' }), onclick: () => submitAssign({}) }, `Assign to ${a.sel.size || 'none'}`), el('button', { class: 'x', onclick: closeAssign }, 'Close')]));
+}
+async function submitAssign({ replace, only }) {
+  const a = _asg, names = Object.fromEntries(a.target.entries.map(e => [e.slug, e.name]));
+  const body = { target: a.target.name, ...PFAssign.buildTargets(only ? [only] : [...a.sel], a.role, names), tag: a.tag || '', note: a.note || '', ...(replace ? { replace } : {}) };
+  let r, j;
+  try { r = await fetch('/api/gallery/' + a.file + '/assign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); j = await r.json(); } catch (e) { j = { error: String(e) }; r = { ok: false }; }
+  const fresh = r.ok ? j.results : [{ slug: '', role: a.role, ok: false, error: j.error }];
+  a.results = [...(a.results || []).filter(x => !only || x.slug !== only), ...fresh];
+  a.counts = {}; await refreshCounts();
+  drawAssign();
+  const meta = await fetch('/api/gallery-meta/' + a.file).then(x => x.json()).catch(() => ({}));
+  setTileBadge(a.file, meta.links || []);
+}
 
 // ---- regenerate from a gallery image (image-to-image through /api/regenerate, the picture is read on the server) ----
 let _regenFile = null;
@@ -925,7 +993,7 @@ async function loadGallery(reset = true) {
     if (reset) { g.innerHTML = ''; g.append(galBar); }
     $('#galCount').textContent = _galFilter.character || _galFilter.unassigned ? `${r.total || 0} shown` : '';
     const old = $('#gallerySentinel'); if (old) old.remove();
-    (r.items || []).forEach(it => g.append(imgTile(it.file, null, it.commercial_use)));
+    (r.items || []).forEach(it => g.append(imgTile(it.file, null, it.commercial_use, it.link)));
     _galOffset += (r.items || []).length;
     _galTotal = r.total || _galOffset;
     if (_galOffset < _galTotal) {
