@@ -614,6 +614,12 @@ def resolve_job(spec):
         for k, v in (("steps", 8), ("cfg", 1.0), ("sampler", "euler"), ("scheduler", "simple")):
             if spec.get(k) is None:
                 j[k] = v
+        # The Krea graph has no negative text (its negative is a zeroed copy of the positive), so the SDXL default negative is not applied here and must
+        # not be recorded as if it were: an unspecified negative is empty, an explicit one is left as resolve_job built it.
+        if not (spec.get("negative") or "").strip():
+            j["negative"] = ""
+            if isinstance(j.get("prompt_used"), dict) and "negative" in j["prompt_used"]:
+                j["prompt_used"]["negative"] = ""
         
         # Validate and handle LoRAs for Krea 2
         if "loras" in spec:
