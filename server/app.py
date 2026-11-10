@@ -14,7 +14,7 @@ import urllib.request
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from core import (assemble, cf_characters, comfy, comfy_proc, data, events, gpu_client, gpu_session, pose_ops, randomizer, rig,
+from core import (assemble, cf_characters, comfy, comfy_proc, data, events, gallery_chars, gpu_client, gpu_session, pose_ops, randomizer, rig,
                   secondbrain, themes, thumbs)
 
 logger = logging.getLogger(__name__)
@@ -916,10 +916,22 @@ def _safe_gallery_path(name):
     return p if (p == root or p.startswith(root + os.sep)) else None
 
 
+def _gallery_names():
+    """{normalised name: display name} for every CharacterForge character, to match gallery images against."""
+    return {gallery_chars.norm(n): n for n in cf_characters.character_names()} if cf_characters.configured() else {}
+
+
+def _gallery_info(rel, names):
+    """(characters, link count) of one gallery image, from its cached sidecar."""
+    raw = gallery_chars.raw_for(_sidecar_path_for(rel))
+    return gallery_chars.resolve(raw, names), raw["links"]
+
+
 @app.route("/api/gallery")
 def gallery():
-    """Newest-first page of gallery image relpaths (no sidecar meta — see
-    /api/gallery-meta). ?offset= &limit= for infinite scroll."""
+    """Newest-first page of gallery image relpaths (no sidecar meta — see /api/gallery-meta), each with the characters it shows
+    ([{name, guessed}]). ?offset= &limit= for infinite scroll; ?character=<name or slug> keeps images of that character
+    ("none" = images with no character); ?linked=none|any keeps images without / with links to a character entry."""
     if not os.path.isdir(GALLERY_DIR):
         return jsonify({"items": [], "total": 0, "offset": 0, "limit": 0})
     try:
@@ -928,11 +940,41 @@ def gallery():
     except ValueError:
         offset, limit = 0, 60
     rows = _gallery_pngs()
+    names = _gallery_names()
+    who = request.args.get("character", "").strip()
+    linked = request.args.get("linked", "").strip()
+    infos = {}
+    if who or linked in ("none", "any"):
+        keep = []
+        for rel, ts in rows:
+            infos[rel] = _gallery_info(rel, names)
+            chars, nlinks = infos[rel]
+            if who == "none" and chars or who and who != "none" and gallery_chars.norm(who) not in {gallery_chars.norm(c["name"]) for c in chars}:
+                continue
+            if (linked == "none" and nlinks) or (linked == "any" and not nlinks):
+                continue
+            keep.append((rel, ts))
+        rows = keep
     page = rows[offset:offset + limit]
     return jsonify({
-        "items": [{"file": rel, "ts": ts} for rel, ts in page],
+        "items": [{"file": rel, "ts": ts, "characters": (infos.get(rel) or _gallery_info(rel, names))[0]} for rel, ts in page],
         "total": len(rows), "offset": offset, "limit": limit,
     })
+
+
+@app.route("/api/gallery-characters")
+def gallery_characters():
+    """Counts for the gallery's character filter: [{name, count, guessed}] most images first, plus how many images show no character."""
+    names, counts, none, total = _gallery_names(), {}, 0, 0
+    for rel, _ts in _gallery_pngs():
+        total += 1
+        chars = _gallery_info(rel, names)[0]
+        none += 0 if chars else 1
+        for c in chars:
+            row = counts.setdefault(c["name"], {"name": c["name"], "count": 0, "guessed": 0})
+            row["count"] += 1
+            row["guessed"] += 1 if c["guessed"] else 0
+    return jsonify({"characters": sorted(counts.values(), key=lambda r: (-r["count"], r["name"].lower())), "none": none, "total": total})
 
 
 @app.route("/api/gallery-meta/<path:name>")
@@ -945,9 +987,12 @@ def gallery_meta(name):
     sp = os.path.join(d, base.split("_")[0] + ".json")
     try:
         with open(sp) as fh:
-            return jsonify(json.load(fh))
+            meta = json.load(fh)
     except OSError:
         return jsonify({})
+    if isinstance(meta, dict):   # who this image shows, so the lightbox can name them
+        meta["characters"] = gallery_chars.resolve(gallery_chars.raw_for(sp), _gallery_names())
+    return jsonify(meta)
 
 
 @app.route("/api/thumb/<path:name>")

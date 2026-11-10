@@ -807,6 +807,7 @@ function openLB(file, meta) {
   const p = (meta || {}).prompt_used || {};
   $('#lbInfo').append(
     el('div', {}, `seed ${meta?.seed ?? '?'} · ${meta?.model || ''}`),
+    (meta?.characters || []).length ? el('div', { class: 'who' }, 'Character: ' + meta.characters.map(c => c.name + (c.guessed ? ' (guessed)' : '')).join(', ')) : '',
     el('button', { class: 'x', onclick: () => { $('#lightbox').classList.remove('on'); openRegen(file, meta); } }, '🎨 Regenerate from this image'),
     el('pre', { html: (p.positive || [p.region_a, p.region_b, p.base].filter(Boolean).join('\n\nBREAK\n')) || '' }),
     el('pre', { html: p.negative || '' }));
@@ -867,6 +868,23 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#regenP
 let _galOffset = 0, _galTotal = 0, _galLoading = false;
 const _GAL_PAGE = 48;
 let _galObserver = null;
+let _galFilter = { character: '', unassigned: false };   // the toolbar's filter; sent with every page request
+const _galQuery = () => (_galFilter.character ? `&character=${encodeURIComponent(_galFilter.character)}` : '') + (_galFilter.unassigned ? '&linked=none' : '');
+// The filter bar is the first row of the grid; loadGallery clears the grid, so the same element is put back each time.
+const galBar = el('div', { id: 'galBar' }, [
+  el('select', { id: 'galChar', title: 'Show only the images of one character', onchange: e => { _galFilter.character = e.target.value; loadGallery(); } }, [el('option', { value: '' }, 'All characters')]),
+  el('label', { title: 'Hide images already linked to a character entry' }, [el('input', { type: 'checkbox', id: 'galUnassigned', onchange: e => { _galFilter.unassigned = e.target.checked; loadGallery(); } }), ' unassigned only']),
+  el('span', { id: 'galCount' }, '')]);
+async function refreshGalleryCharacters() {   // counts for the dropdown: who is in the gallery and how many images each has
+  const r = await fetch('/api/gallery-characters').then(r => r.json()).catch(() => null);
+  const sel = $('#galChar');
+  if (!r || !sel) return;
+  const opts = [['', `All characters (${r.total})`], ['none', `No character (${r.none})`]]
+    .concat((r.characters || []).map(c => [c.name, `${c.name} (${c.count}${c.guessed ? `, ${c.guessed} guessed` : ''})`]));
+  sel.innerHTML = '';
+  opts.forEach(([v, t]) => sel.append(el('option', { value: v }, t)));
+  sel.value = _galFilter.character;
+}
 
 function _skelTiles(n) {
   return Array.from({ length: n }, () => el('div', { class: 'tile skel' }));
@@ -878,14 +896,16 @@ async function loadGallery(reset = true) {
   if (reset) {
     _galOffset = 0; _galTotal = 0;
     g.innerHTML = '';
-    g.append(..._skelTiles(12));   // placeholders while page 1 loads
+    g.append(galBar, ..._skelTiles(12));   // placeholders while page 1 loads
+    refreshGalleryCharacters();
   }
   if (_galOffset && _galOffset >= _galTotal) return;
   _galLoading = true;
   try {
-    const r = await fetch(`/api/gallery?offset=${_galOffset}&limit=${_GAL_PAGE}`)
+    const r = await fetch(`/api/gallery?offset=${_galOffset}&limit=${_GAL_PAGE}${_galQuery()}`)
       .then(r => r.json()).catch(err => { console.error('loadGallery fetch failed:', err); return { items: [], total: 0 }; });
-    if (reset) g.innerHTML = '';
+    if (reset) { g.innerHTML = ''; g.append(galBar); }
+    $('#galCount').textContent = _galFilter.character || _galFilter.unassigned ? `${r.total || 0} shown` : '';
     const old = $('#gallerySentinel'); if (old) old.remove();
     (r.items || []).forEach(it => g.append(imgTile(it.file)));
     _galOffset += (r.items || []).length;
@@ -902,6 +922,7 @@ async function loadGallery(reset = true) {
 
 // ---- live gallery: the server pushes finished and deleted images, so no refresh and no polling ----
 function addNewTiles(files) {
+  if (_galFilter.character || _galFilter.unassigned) return;   // a filtered view is not told about every new image; it refreshes on the next filter change
   const g = $('#gallery');
   const fresh = PFTileDedupe.freshFiles(_shown, files);
   if (!fresh.length) return;
