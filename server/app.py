@@ -17,7 +17,7 @@ import zipfile
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from core import (assemble, cf_characters, clean, comfy, comfy_proc, data, events, gallery_chars, gpu_client, gpu_session, licenses, link_targets, pose_ops,
+from core import (assemble, cf_characters, clean, comfy, comfy_proc, data, events, gallery_chars, gpu_client, gpu_session, imgmeta, licenses, link_targets, pose_ops,
                   randomizer, rig, secondbrain, themes, thumbs)
 from core import loras as loras_mod
 
@@ -1157,6 +1157,20 @@ def gallery_clean_many():
             used.add(fname)
             z.writestr(fname, out)
     return Response(buf.getvalue(), mimetype="application/zip", headers={"Content-Disposition": 'attachment; filename="clean_images.zip"'})
+
+
+@app.route("/api/gallery-recipe/<path:name>")
+def gallery_recipe(name):
+    """How a gallery image was made, read from its embedded metadata: {meta: imgmeta.read, match: imgmeta.match_registry} (404 for an unknown image)."""
+    p = _safe_gallery_path(name)
+    if not p or not os.path.isfile(p):
+        return jsonify({"error": "not found"}), 404
+    meta = imgmeta.read(p)
+    try:
+        installed = os.listdir(loras_mod.loras_dir())
+    except OSError:
+        installed = None
+    return jsonify({"meta": meta, "match": imgmeta.match_registry(meta, loras_mod.load_registry(), installed)})
 
 
 @app.route("/api/gallery-meta/<path:name>")
