@@ -24,7 +24,7 @@ import urllib.parse
 import urllib.request
 import uuid
 
-from . import comfy_proc, events, gpu_client, gpu_session
+from . import comfy_proc, events, gpu_client, gpu_session, loras
 
 logger = logging.getLogger(__name__)
 
@@ -443,8 +443,22 @@ def build_repair_graph(job):
     return g
 
 
+def _sdxl_chain_loras(g, job):
+    """Chain LoraLoader nodes (ids 60+) after the checkpoint when the job has `loras` (each taking the previous model/clip); returns the
+    final (model_ref, clip_ref). With no loras it adds nothing and returns the checkpoint's own outputs, so the graph is unchanged."""
+    model_ref, clip_ref = ["1", 0], ["1", 1]
+    for i, lora in enumerate(job.get("loras") or []):
+        lora_id = str(60 + i)
+        g[lora_id] = {"class_type": "LoraLoader", "inputs": {
+            "model": model_ref, "clip": clip_ref, "lora_name": lora["name"],
+            "strength_model": lora.get("weight", 1.0), "strength_clip": lora.get("weight", 1.0)}}
+        model_ref, clip_ref = [lora_id, 0], [lora_id, 1]
+    return model_ref, clip_ref
+
+
 def build_graph(job):
-    """job: resolved dict (see module docstring / generate()). Returns API graph."""
+    """job: resolved dict (see module docstring / generate()). Returns API graph. An SDXL job with `loras` (validated by loras.validate_stack)
+    gets a LoraLoader chain and its trigger words in front of the positive text (the shared `base` text for two characters)."""
     if is_krea2(job.get("model")):
         return build_krea2_graph(job)
     w, h = int(job["width"]), int(job["height"])
@@ -464,15 +478,18 @@ def build_graph(job):
         "13": {"class_type": "SaveImage",
                "inputs": {"filename_prefix": prefix, "images": ["12", 0]}},
     }
+    model_ref, clip_ref = _sdxl_chain_loras(g, job)
+    g["50"]["inputs"]["clip"] = clip_ref
     ks = {"class_type": "KSampler", "inputs": {
         "seed": seed, "steps": int(job["steps"]), "cfg": float(job["cfg"]),
         "sampler_name": job["sampler"], "scheduler": job["scheduler"], "denoise": 1.0,
-        "model": ["1", 0], "latent_image": ["10", 0]}}
+        "model": model_ref, "latent_image": ["10", 0]}}
+    stack = job.get("loras")
 
     if n == 2:
         g["6"] = _smz(job["region_a"], ["50", 0], w, h)
         g["7"] = _smz(job["region_b"], ["50", 0], w, h)
-        g["8"] = _smz(job["base"], ["50", 0], w, h)
+        g["8"] = _smz(loras.with_triggers(job["base"], stack), ["50", 0], w, h)
         g["9"] = _smz(job["negative"], ["50", 0], w, h)
         g["30"] = {"class_type": "PromptForgeRegionalCombine", "inputs": {
             "region_a": ["6", 0], "region_b": ["7", 0], "base": ["8", 0],
@@ -481,7 +498,7 @@ def build_graph(job):
             "region_c_bounds": "unused"}}
         pos_ref, neg_ref = ["30", 0], ["9", 0]
     else:
-        g["6"] = _smz(job["positive"], ["50", 0], w, h)
+        g["6"] = _smz(loras.with_triggers(job["positive"], stack), ["50", 0], w, h)
         g["7"] = _smz(job["negative"], ["50", 0], w, h)
         pos_ref, neg_ref = ["6", 0], ["7", 0]
 

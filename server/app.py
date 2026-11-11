@@ -19,6 +19,7 @@ from flask import Flask, Response, jsonify, request, send_from_directory
 
 from core import (assemble, cf_characters, clean, comfy, comfy_proc, data, events, gallery_chars, gpu_client, gpu_session, licenses, link_targets, pose_ops,
                   randomizer, rig, secondbrain, themes, thumbs)
+from core import loras as loras_mod
 
 logger = logging.getLogger(__name__)
 
@@ -677,14 +678,33 @@ def resolve_job(spec):
             j["positive"] = text
             j["prompt_used"] = {"positive": text, "negative": j["negative"]}
     else:
-        # Non-Krea-2 model: ignore LoRAs with a warning
-        if "loras" in spec:
-            j["warnings"] = j.get("warnings") or []
-            j["warnings"].append(f"LoRAs ignored for non-Krea-2 model '{j['model']}'")
+        # SDXL / Illustrious model: validate the LoRA stack (file present, weights in range, base mismatch is a warning); build_graph chains it
+        if spec.get("loras"):
+            registry = loras_mod.load_registry()
+            try:
+                j["loras"], lora_warnings = loras_mod.validate_stack(spec["loras"], loras_mod.model_base(registry, j["model"]), registry=registry)
+            except (ValueError, FileNotFoundError) as e:
+                raise ValueError(f"Invalid LoRA configuration: {e}")
+            if lora_warnings:
+                j["warnings"] = (j.get("warnings") or []) + lora_warnings
 
     j["spec"] = spec
     j["nsfw"] = nsfw
     return j
+
+
+@app.route("/api/loras")
+def loras_list():
+    """The LoRA registry with `present` (is the file in ComfyUI's loras folder) and `fits` (the checkpoints the registry lists with the same base)."""
+    registry = loras_mod.load_registry()
+    folder = loras_mod.loras_dir()
+    rows = []
+    for e in registry["loras"]:
+        row = dict(e)
+        row["present"] = os.path.isfile(os.path.join(folder, e.get("file", "")))
+        row["fits"] = sorted(c for c, b in registry["checkpoints"].items() if b == e.get("base"))
+        rows.append(row)
+    return jsonify({"loras": rows, "checkpoints": registry["checkpoints"]})
 
 
 @app.route("/api/preview", methods=["POST"])
