@@ -15,13 +15,18 @@ import json
 import os
 import re
 import secrets
+import socket
 import struct
 import sys
+import threading
+import http.client
 import urllib.error
 import urllib.parse
 import urllib.request
 
 MAX_BYTES = 6 * 1024 ** 3
+CONNECT_TIMEOUT = 3.0   # seconds a single address gets before the next one is tried
+FETCH_DEADLINE = 20.0   # seconds a metadata fetch may take in all
 ALLOWED_HOSTS = ("civitai.com", "www.civitai.com", "civitai.red", "www.civitai.red", "huggingface.co")
 TYPE_DIRS = {"lora": "loras", "locon": "loras", "dora": "loras", "checkpoint": "checkpoints", "textualinversion": "embeddings", "embedding": "embeddings"}
 DEFAULT_MODELS_DIR = "/media/model-cache/github/TheAgent/app/tools/ComfyUI/models"
@@ -74,15 +79,71 @@ class _NoAuthOnRedirect(urllib.request.HTTPRedirectHandler):
         return new
 
 
+def _connect_ipv4_first(host, port, timeout, connect_timeout=None, source_address=None):
+    """Like socket.create_connection, but IPv4 addresses are tried before IPv6 and each address gets only connect_timeout seconds."""
+    per = CONNECT_TIMEOUT if connect_timeout is None else connect_timeout
+    infos = socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
+    infos.sort(key=lambda i: 0 if i[0] == socket.AF_INET else 1)
+    err = None
+    for family, kind, proto, _name, addr in infos:
+        sock = None
+        try:
+            sock = socket.socket(family, kind, proto)
+            sock.settimeout(min(per, timeout) if timeout else per)
+            if source_address:
+                sock.bind(source_address)
+            sock.connect(addr)
+            sock.settimeout(timeout)
+            return sock
+        except OSError as e:
+            err = e
+            if sock is not None:
+                sock.close()
+    raise err or OSError("no address found for %s" % host)
+
+
+class _Ipv4FirstHTTPSConnection(http.client.HTTPSConnection):
+    def connect(self):
+        self.sock = _connect_ipv4_first(self.host, self.port, self.timeout, source_address=self.source_address)
+        if self._tunnel_host:
+            self._tunnel()
+        self.sock = self._context.wrap_socket(self.sock, server_hostname=self._tunnel_host or self.host)
+
+
+class _Ipv4FirstHTTPSHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(_Ipv4FirstHTTPSConnection, req)
+
+
 def _opener():
-    return urllib.request.build_opener(_NoAuthOnRedirect())
+    return urllib.request.build_opener(_NoAuthOnRedirect(), _Ipv4FirstHTTPSHandler())
 
 
-def default_fetcher(url, headers=None):
-    """GET `url` and return the body bytes (30 s timeout)."""
+def _read_all(url, headers, timeout):
     req = urllib.request.Request(url, headers=dict(headers or {}, **{"User-Agent": "promptforge-importer/1"}))
-    with _opener().open(req, timeout=30) as r:
+    with _opener().open(req, timeout=timeout) as r:
         return r.read()
+
+
+def default_fetcher(url, headers=None, deadline=None):
+    """GET `url` and return the body bytes. IPv4 first; ImportError_ when the site has not answered after `deadline` seconds (default 20)."""
+    limit = FETCH_DEADLINE if deadline is None else deadline
+    box = {}
+
+    def run():
+        try:
+            box["body"] = _read_all(url, headers, limit)
+        except BaseException as e:  # handed back to the caller's thread
+            box["err"] = e
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(limit)
+    if t.is_alive():
+        raise ImportError_("the site did not answer in %g s" % limit)
+    if "err" in box:
+        raise box["err"]
+    return box["body"]
 
 
 def default_downloader(url, dest, headers=None, max_bytes=MAX_BYTES, progress=None):
