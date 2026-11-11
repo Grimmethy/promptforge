@@ -1,0 +1,536 @@
+{
+ "graphs": {
+  "single": {
+   "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+     "ckpt_name": "novaFurryXL_ilV140.safetensors"
+    }
+   },
+   "10": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+     "batch_size": 1,
+     "height": 1216,
+     "width": 832
+    }
+   },
+   "11": {
+    "class_type": "KSampler",
+    "inputs": {
+     "cfg": 4.5,
+     "denoise": 1.0,
+     "latent_image": [
+      "10",
+      0
+     ],
+     "model": [
+      "1",
+      0
+     ],
+     "negative": [
+      "7",
+      0
+     ],
+     "positive": [
+      "6",
+      0
+     ],
+     "sampler_name": "dpmpp_2m_sde",
+     "scheduler": "karras",
+     "seed": 7,
+     "steps": 28
+    }
+   },
+   "12": {
+    "class_type": "VAEDecode",
+    "inputs": {
+     "samples": [
+      "11",
+      0
+     ],
+     "vae": [
+      "1",
+      2
+     ]
+    }
+   },
+   "13": {
+    "class_type": "SaveImage",
+    "inputs": {
+     "filename_prefix": "promptforge_abcdef12",
+     "images": [
+      "12",
+      0
+     ]
+    }
+   },
+   "50": {
+    "class_type": "CLIPSetLastLayer",
+    "inputs": {
+     "clip": [
+      "1",
+      1
+     ],
+     "stop_at_clip_layer": -2
+    }
+   },
+   "6": {
+    "class_type": "smZ CLIPTextEncode",
+    "inputs": {
+     "ascore": 6.0,
+     "clip": [
+      "50",
+      0
+     ],
+     "crop_h": 0,
+     "crop_w": 0,
+     "height": 1216,
+     "mean_normalization": false,
+     "multi_conditioning": false,
+     "parser": "A1111",
+     "target_height": 1216,
+     "target_width": 832,
+     "text": "1girl, goblin",
+     "text_g": "",
+     "text_l": "",
+     "use_old_emphasis_implementation": false,
+     "width": 832,
+     "with_SDXL": false
+    }
+   },
+   "7": {
+    "class_type": "smZ CLIPTextEncode",
+    "inputs": {
+     "ascore": 6.0,
+     "clip": [
+      "50",
+      0
+     ],
+     "crop_h": 0,
+     "crop_w": 0,
+     "height": 1216,
+     "mean_normalization": false,
+     "multi_conditioning": false,
+     "parser": "A1111",
+     "target_height": 1216,
+     "target_width": 832,
+     "text": "bad hands",
+     "text_g": "",
+     "text_l": "",
+     "use_old_emphasis_implementation": false,
+     "width": 832,
+     "with_SDXL": false
+    }
+   }
+  },
+  "skeleton": {
+   "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+     "ckpt_name": "novaFurryXL_ilV140.safetensors"
+    }
+   },
+   "10": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+     "batch_size": 1,
+     "height": 1216,
+     "width": 832
+    }
+   },
+   "11": {
+    "class_type": "KSampler",
+    "inputs": {
+     "cfg": 4.5,
+     "denoise": 1.0,
+     "latent_image": [
+      "10",
+      0
+     ],
+     "model": [
+      "1",
+      0
+     ],
+     "negative": [
+      "42",
+      1
+     ],
+     "positive": [
+      "42",
+      0
+     ],
+     "sampler_name": "dpmpp_2m_sde",
+     "scheduler": "karras",
+     "seed": 7,
+     "steps": 28
+    }
+   },
+   "12": {
+    "class_type": "VAEDecode",
+    "inputs": {
+     "samples": [
+      "11",
+      0
+     ],
+     "vae": [
+      "1",
+      2
+     ]
+    }
+   },
+   "13": {
+    "class_type": "SaveImage",
+    "inputs": {
+     "filename_prefix": "promptforge_abcdef12",
+     "images": [
+      "12",
+      0
+     ]
+    }
+   },
+   "40": {
+    "class_type": "ControlNetLoader",
+    "inputs": {
+     "control_net_name": "controlnet-openpose-sdxl-1.0.safetensors"
+    }
+   },
+   "41": {
+    "class_type": "LoadImage",
+    "inputs": {
+     "image": "pose.png"
+    }
+   },
+   "42": {
+    "class_type": "ControlNetApplyAdvanced",
+    "inputs": {
+     "control_net": [
+      "40",
+      0
+     ],
+     "end_percent": 0.7,
+     "image": [
+      "41",
+      0
+     ],
+     "negative": [
+      "7",
+      0
+     ],
+     "positive": [
+      "6",
+      0
+     ],
+     "start_percent": 0.0,
+     "strength": 0.8
+    }
+   },
+   "50": {
+    "class_type": "CLIPSetLastLayer",
+    "inputs": {
+     "clip": [
+      "1",
+      1
+     ],
+     "stop_at_clip_layer": -2
+    }
+   },
+   "6": {
+    "class_type": "smZ CLIPTextEncode",
+    "inputs": {
+     "ascore": 6.0,
+     "clip": [
+      "50",
+      0
+     ],
+     "crop_h": 0,
+     "crop_w": 0,
+     "height": 1216,
+     "mean_normalization": false,
+     "multi_conditioning": false,
+     "parser": "A1111",
+     "target_height": 1216,
+     "target_width": 832,
+     "text": "1girl, goblin",
+     "text_g": "",
+     "text_l": "",
+     "use_old_emphasis_implementation": false,
+     "width": 832,
+     "with_SDXL": false
+    }
+   },
+   "7": {
+    "class_type": "smZ CLIPTextEncode",
+    "inputs": {
+     "ascore": 6.0,
+     "clip": [
+      "50",
+      0
+     ],
+     "crop_h": 0,
+     "crop_w": 0,
+     "height": 1216,
+     "mean_normalization": false,
+     "multi_conditioning": false,
+     "parser": "A1111",
+     "target_height": 1216,
+     "target_width": 832,
+     "text": "bad hands",
+     "text_g": "",
+     "text_l": "",
+     "use_old_emphasis_implementation": false,
+     "width": 832,
+     "with_SDXL": false
+    }
+   }
+  },
+  "two": {
+   "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+     "ckpt_name": "novaFurryXL_ilV140.safetensors"
+    }
+   },
+   "10": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+     "batch_size": 1,
+     "height": 1216,
+     "width": 832
+    }
+   },
+   "11": {
+    "class_type": "KSampler",
+    "inputs": {
+     "cfg": 4.5,
+     "denoise": 1.0,
+     "latent_image": [
+      "10",
+      0
+     ],
+     "model": [
+      "1",
+      0
+     ],
+     "negative": [
+      "9",
+      0
+     ],
+     "positive": [
+      "30",
+      0
+     ],
+     "sampler_name": "dpmpp_2m_sde",
+     "scheduler": "karras",
+     "seed": 7,
+     "steps": 28
+    }
+   },
+   "12": {
+    "class_type": "VAEDecode",
+    "inputs": {
+     "samples": [
+      "11",
+      0
+     ],
+     "vae": [
+      "1",
+      2
+     ]
+    }
+   },
+   "13": {
+    "class_type": "SaveImage",
+    "inputs": {
+     "filename_prefix": "promptforge_abcdef12",
+     "images": [
+      "12",
+      0
+     ]
+    }
+   },
+   "30": {
+    "class_type": "PromptForgeRegionalCombine",
+    "inputs": {
+     "base": [
+      "8",
+      0
+     ],
+     "base_strength": 0.45,
+     "feather": 24,
+     "layout": "side by side - A left",
+     "region_a": [
+      "6",
+      0
+     ],
+     "region_b": [
+      "7",
+      0
+     ],
+     "region_c_bounds": "unused",
+     "region_strength": 1.05
+    }
+   },
+   "50": {
+    "class_type": "CLIPSetLastLayer",
+    "inputs": {
+     "clip": [
+      "1",
+      1
+     ],
+     "stop_at_clip_layer": -2
+    }
+   },
+   "6": {
+    "class_type": "smZ CLIPTextEncode",
+    "inputs": {
+     "ascore": 6.0,
+     "clip": [
+      "50",
+      0
+     ],
+     "crop_h": 0,
+     "crop_w": 0,
+     "height": 1216,
+     "mean_normalization": false,
+     "multi_conditioning": false,
+     "parser": "A1111",
+     "target_height": 1216,
+     "target_width": 832,
+     "text": "1girl, a",
+     "text_g": "",
+     "text_l": "",
+     "use_old_emphasis_implementation": false,
+     "width": 832,
+     "with_SDXL": false
+    }
+   },
+   "7": {
+    "class_type": "smZ CLIPTextEncode",
+    "inputs": {
+     "ascore": 6.0,
+     "clip": [
+      "50",
+      0
+     ],
+     "crop_h": 0,
+     "crop_w": 0,
+     "height": 1216,
+     "mean_normalization": false,
+     "multi_conditioning": false,
+     "parser": "A1111",
+     "target_height": 1216,
+     "target_width": 832,
+     "text": "1boy, b",
+     "text_g": "",
+     "text_l": "",
+     "use_old_emphasis_implementation": false,
+     "width": 832,
+     "with_SDXL": false
+    }
+   },
+   "8": {
+    "class_type": "smZ CLIPTextEncode",
+    "inputs": {
+     "ascore": 6.0,
+     "clip": [
+      "50",
+      0
+     ],
+     "crop_h": 0,
+     "crop_w": 0,
+     "height": 1216,
+     "mean_normalization": false,
+     "multi_conditioning": false,
+     "parser": "A1111",
+     "target_height": 1216,
+     "target_width": 832,
+     "text": "masterpiece",
+     "text_g": "",
+     "text_l": "",
+     "use_old_emphasis_implementation": false,
+     "width": 832,
+     "with_SDXL": false
+    }
+   },
+   "9": {
+    "class_type": "smZ CLIPTextEncode",
+    "inputs": {
+     "ascore": 6.0,
+     "clip": [
+      "50",
+      0
+     ],
+     "crop_h": 0,
+     "crop_w": 0,
+     "height": 1216,
+     "mean_normalization": false,
+     "multi_conditioning": false,
+     "parser": "A1111",
+     "target_height": 1216,
+     "target_width": 832,
+     "text": "bad hands",
+     "text_g": "",
+     "text_l": "",
+     "use_old_emphasis_implementation": false,
+     "width": 832,
+     "with_SDXL": false
+    }
+   }
+  }
+ },
+ "jobs": {
+  "single": {
+   "batch": 1,
+   "cfg": 4.5,
+   "height": 1216,
+   "id": "abcdef1234567890",
+   "model": "novaFurryXL_ilV140.safetensors",
+   "n_chars": 1,
+   "negative": "bad hands",
+   "positive": "1girl, goblin",
+   "sampler": "dpmpp_2m_sde",
+   "scheduler": "karras",
+   "seed": 7,
+   "steps": 28,
+   "width": 832
+  },
+  "skeleton": {
+   "batch": 1,
+   "cfg": 4.5,
+   "cn_end": 0.7,
+   "cn_strength": 0.8,
+   "height": 1216,
+   "id": "abcdef1234567890",
+   "model": "novaFurryXL_ilV140.safetensors",
+   "n_chars": 1,
+   "negative": "bad hands",
+   "positive": "1girl, goblin",
+   "sampler": "dpmpp_2m_sde",
+   "scheduler": "karras",
+   "seed": 7,
+   "skeleton_name": "pose.png",
+   "steps": 28,
+   "width": 832
+  },
+  "two": {
+   "base": "masterpiece",
+   "batch": 1,
+   "cfg": 4.5,
+   "height": 1216,
+   "id": "abcdef1234567890",
+   "layout": "side by side - A left",
+   "model": "novaFurryXL_ilV140.safetensors",
+   "n_chars": 2,
+   "negative": "bad hands",
+   "positive": "1girl, goblin",
+   "region_a": "1girl, a",
+   "region_b": "1boy, b",
+   "sampler": "dpmpp_2m_sde",
+   "scheduler": "karras",
+   "seed": 7,
+   "steps": 28,
+   "width": 832
+  }
+ }
+}
