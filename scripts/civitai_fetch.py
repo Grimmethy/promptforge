@@ -8,6 +8,7 @@ Prints ONE JSON line and exits 0 (ok) or 1. Never prints a name, a cookie or a p
 import argparse
 import json
 import os
+import signal
 import sys
 
 HOME_URL = "https://civitai.com"
@@ -60,6 +61,13 @@ def fetch(sessions, url, dest, timeout=600, headless=True):
     return {"ok": True, "bytes": os.path.getsize(dest)}
 
 
+def install_term_handler():
+    """SIGTERM (the caller's timeout) becomes SystemExit so the Sessions context closes the browser it started instead of leaving it running."""
+    def stop(signum, frame):
+        raise SystemExit(143)
+    signal.signal(signal.SIGTERM, stop)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--profile", required=True)
@@ -72,6 +80,7 @@ def main(argv=None):
     ap.add_argument("--headed", action="store_true")
     a = ap.parse_args(argv)
     from site_sessions.core import Sessions, load_sites
+    install_term_handler()
     sessions = Sessions(a.profile, a.port, load_sites(a.sites) if a.sites else None)
     try:
         if a.status:

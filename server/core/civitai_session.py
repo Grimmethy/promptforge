@@ -11,6 +11,8 @@ DEFAULT_PORT = 9341
 _HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(_HERE, "..", "..", "scripts", "civitai_fetch.py")
 SITES_FILE = os.path.join(_HERE, "..", "..", "data", "sites.toml")
+STATUS_TIMEOUT = 90
+TERM_GRACE = 20       # seconds a timed-out helper gets, after SIGTERM, to close its browser before it is killed
 _login = [None]
 
 
@@ -49,8 +51,19 @@ def port_busy():
 
 
 def _run(argv, timeout):
-    p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
-    return p.returncode, p.stdout
+    """Run the helper. On a timeout it gets SIGTERM first (the helper then closes the browser it started) and SIGKILL only after TERM_GRACE seconds."""
+    p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    try:
+        out, _ = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        p.terminate()
+        try:
+            p.communicate(timeout=TERM_GRACE)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            p.communicate()
+        raise
+    return p.returncode, out
 
 
 def _base(py):
@@ -66,7 +79,7 @@ def _json_line(out):
     return None
 
 
-def status(runner=None, timeout=45):
+def status(runner=None, timeout=STATUS_TIMEOUT):
     """{signed_in: bool|None, available: bool, error: str|None}. Never raises."""
     py = session_python()
     if not py:
