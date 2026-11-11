@@ -147,5 +147,20 @@ class FetchTest(unittest.TestCase):
             self.assertNotIn(bad, src.replace("password-free", "").replace("a password", ""))
 
 
+class TermHandlerTest(unittest.TestCase):
+    def test_sigterm_becomes_systemexit_so_the_browser_context_closes(self):
+        import signal
+        old = signal.getsignal(signal.SIGTERM)
+        self.addCleanup(signal.signal, signal.SIGTERM, old)
+        cf.install_term_handler()
+        handler = signal.getsignal(signal.SIGTERM)
+        self.assertNotEqual(handler, old)
+        with self.assertRaises(SystemExit):
+            handler(signal.SIGTERM, None)
+
+    def test_main_installs_the_handler(self):
+        self.assertIn("install_term_handler()", open(os.path.join(HERE, "..", "scripts", "civitai_fetch.py")).read().split("def main")[1])
+
+
 if __name__ == "__main__":
     unittest.main()

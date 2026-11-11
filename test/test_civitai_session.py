@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -136,6 +137,54 @@ class LoginTest(Base):
         text = open(cs.SITES_FILE).read()
         self.assertIn("[site.civitai]", text)
         self.assertNotIn("password =", text.lower())
+
+
+class RunTest(Base):
+    """_run with real throwaway python children (no browser): SIGTERM first, SIGKILL only after the grace period."""
+
+    def child(self, body):
+        return [sys.executable, "-c", "import signal, sys, time\n" + body]
+
+    def test_normal_answer_passes_through(self):
+        rc, out = cs._run(self.child("print('{\"signed_in\": true}')"), 10)
+        self.assertEqual((rc, out.strip()), (0, '{"signed_in": true}'))
+
+    def test_timeout_sends_sigterm_so_the_child_can_clean_up(self):
+        marker = os.path.join(self.tmp.name, "cleaned")
+        body = ("def stop(*a):\n    open(%r, 'w').close(); sys.exit(0)\n"
+                "signal.signal(signal.SIGTERM, stop)\nprint('ready', flush=True)\ntime.sleep(60)\n") % marker
+        with self.assertRaises(subprocess.TimeoutExpired):
+            cs._run(self.child(body), 1.5)
+        self.assertTrue(os.path.exists(marker), "the child never got SIGTERM")
+
+    def test_a_child_that_ignores_sigterm_is_killed_after_the_grace_period(self):
+        pidfile = os.path.join(self.tmp.name, "pid")
+        body = ("import os\nopen(%r, 'w').write(str(os.getpid()))\n"
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN)\ntime.sleep(60)\n") % pidfile
+        t0 = time.time()
+        with mock.patch.object(cs, "TERM_GRACE", 0.5):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                cs._run(self.child(body), 1.5)
+        self.assertLess(time.time() - t0, 10)
+        pid = int(open(pidfile).read())
+        with self.assertRaises(ProcessLookupError):
+            os.kill(pid, 0)
+
+    def test_the_child_is_waited_for_after_sigterm(self):
+        pidfile = os.path.join(self.tmp.name, "pid2")
+        body = ("import os\nopen(%r, 'w').write(str(os.getpid()))\n"
+                "def stop(*a):\n    time.sleep(0.5); open(%r, 'w').close(); sys.exit(0)\n"
+                "signal.signal(signal.SIGTERM, stop)\ntime.sleep(60)\n") % (pidfile, pidfile + ".done")
+        with self.assertRaises(subprocess.TimeoutExpired):
+            cs._run(self.child(body), 1.5)
+        self.assertTrue(os.path.exists(pidfile + ".done"), "the child was killed before its slow clean-up finished")
+        with self.assertRaises(ProcessLookupError):      # reaped before _run returned: it did not leave a running (or zombie) child
+            os.kill(int(open(pidfile).read()), 0)
+
+    def test_the_default_status_timeout_is_ninety_seconds(self):
+        seen = []
+        cs.status(self.runner('{"signed_in": true}', seen=seen))
+        self.assertEqual((cs.STATUS_TIMEOUT, seen[0][1]), (90, 90))
 
 
 if __name__ == "__main__":
