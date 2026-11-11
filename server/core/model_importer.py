@@ -115,6 +115,10 @@ class _Ipv4FirstHTTPSHandler(urllib.request.HTTPSHandler):
         return self.do_open(_Ipv4FirstHTTPSConnection, req)
 
 
+class AuthRequired(ImportError_):
+    """The site wants the owner signed in for this download (HTTP 401 or 403 from a Civitai host)."""
+
+
 def _opener():
     return urllib.request.build_opener(_NoAuthOnRedirect(), _Ipv4FirstHTTPSHandler())
 
@@ -150,7 +154,13 @@ def default_downloader(url, dest, headers=None, max_bytes=MAX_BYTES, progress=No
     """Stream `url` into the file `dest`; ImportError_ when the body grows past max_bytes. progress(bytes_so_far, total_or_None)."""
     req = urllib.request.Request(url, headers=dict(headers or {}, **{"User-Agent": "promptforge-importer/1"}))
     got = 0
-    with _opener().open(req, timeout=60) as r, open(dest, "wb") as out:
+    try:
+        resp = _opener().open(req, timeout=60)
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403) and "civitai" in (urllib.parse.urlparse(url).hostname or ""):
+            raise AuthRequired("Civitai needs you signed in to download this file")
+        raise
+    with resp as r, open(dest, "wb") as out:
         total = int(r.headers.get("Content-Length") or 0) or None
         while True:
             chunk = r.read(1 << 20)

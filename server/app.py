@@ -12,6 +12,7 @@ import os
 import queue
 import re
 import threading
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -23,6 +24,7 @@ from core import (assemble, cf_characters, clean, comfy, comfy_proc, data, event
                   randomizer, rig, secondbrain, themes, thumbs)
 from core import loras as loras_mod
 from core import model_importer
+from core import civitai_session
 
 logger = logging.getLogger(__name__)
 
@@ -712,7 +714,7 @@ def loras_list():
 
 
 # ---- model importer (server/core/model_importer.py): check a link, then import it after an explicit confirm ----
-IMPORT_IO = {"fetcher": None, "downloader": None}      # tests put fakes here; None means the real network
+IMPORT_IO = {"fetcher": None, "downloader": None, "session": None, "session_status": None, "login": None}   # tests put fakes here; None means the real thing
 _imports = {}                                          # job id -> {status: planning|downloading|verifying|done|error, bytes, total, result, error}
 _import_lock = threading.Lock()
 _import_running = [None]
@@ -757,7 +759,10 @@ def _run_import(job, url, type_override):
         real = IMPORT_IO["downloader"] or model_importer.default_downloader
 
         def download(u, dest, headers, max_bytes, progress):
-            n = real(u, dest, headers, max_bytes, progress)
+            try:
+                n = real(u, dest, headers, max_bytes, progress)
+            except model_importer.AuthRequired:
+                n = _download_via_session(job, u, dest)
             job["status"] = "verifying"
             return n
 
@@ -773,6 +778,54 @@ def _run_import(job, url, type_override):
     finally:
         with _import_lock:
             _import_running[0] = None
+
+
+def _download_via_session(job, url, dest):
+    """Civitai answered 401/403: fetch through the owner's signed-in browser session (they signed in by hand once; no password is ever handled)."""
+    sess = IMPORT_IO["session"] or (civitai_session.download if civitai_session.session_python() else None)
+    if sess is None:
+        raise model_importer.ImportError_("Civitai needs you signed in to download this file, and the sign-in helper was not found")
+    job["via"] = "session"
+    try:
+        os.remove(dest)
+    except OSError:
+        pass
+    try:
+        sess(url, dest)
+    except civitai_session.SessionError as e:
+        if e.kind == "signed_out":
+            job["needs_signin"] = True
+            raise model_importer.ImportError_("Sign in to Civitai (button below), close the window, then press Import again.")
+        raise model_importer.ImportError_("the signed-in download failed: %s" % e.message)
+    return os.path.getsize(dest)
+
+
+_session_cache = {"at": 0.0, "value": None}
+
+
+@app.route("/api/models/session")
+def models_session():
+    """Whether the saved Civitai browser session is signed in (cached 60 s; ?refresh=1 re-checks). Never returns a name or cookie."""
+    fresh = request.args.get("refresh") == "1"
+    now = time.time()
+    if fresh or _session_cache["value"] is None or now - _session_cache["at"] > 60:
+        if _import_running[0]:
+            return jsonify(_session_cache["value"] or {"signed_in": None, "available": True, "error": "an import is running"})
+        _session_cache.update(at=now, value=(IMPORT_IO["session_status"] or civitai_session.status)())
+    return jsonify(_session_cache["value"])
+
+
+@app.route("/api/models/session/login", methods=["POST"])
+def models_session_login():
+    """Open the Civitai sign-in window (plain Brave on the saved profile). 409 while an import or another window is running."""
+    if _import_running[0]:
+        return jsonify({"error": "an import is running; wait for it to finish"}), 409
+    try:
+        (IMPORT_IO["login"] or civitai_session.start_login)()
+    except civitai_session.SessionError as e:
+        return jsonify({"error": e.message}), (409 if e.kind == "busy" else 503)
+    _session_cache.update(at=0.0, value=None)
+    return jsonify({"started": True}), 202
 
 
 @app.route("/api/models/import/<job>")

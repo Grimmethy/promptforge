@@ -71,3 +71,26 @@ test('progressText follows the job through its stages', () => {
   assert.strictEqual(M.progressText({ status: 'done', result: { file: 'f.safetensors', registry_id: 'f' } }), 'Installed f.safetensors (registry id f)');
   assert.strictEqual(M.progressText({ status: 'error', error: 'boom' }), 'Failed: boom');
 });
+
+test('progressText says when the download goes through the signed-in session', () => {
+  assert.strictEqual(M.progressText({ status: 'downloading', via: 'session', bytes: 0 }), 'Downloading through your signed-in Civitai session...');
+  assert.strictEqual(M.progressText({ status: 'verifying', via: 'session' }), 'Verifying the file...');
+  assert.strictEqual(M.progressText({ status: 'downloading', bytes: 3145728 }), 'Downloading 3 MB');
+});
+
+test('sessionLine words the Civitai sign-in state and when the button works', () => {
+  assert.deepStrictEqual(M.sessionLine({ available: true, signed_in: true }), { text: 'Civitai sign-in: signed in', canSignIn: true });
+  assert.deepStrictEqual(M.sessionLine({ available: true, signed_in: false }), { text: 'Civitai sign-in: not signed in', canSignIn: true });
+  assert.deepStrictEqual(M.sessionLine({ available: false, signed_in: null }), { text: 'Civitai sign-in: unavailable', canSignIn: false });
+  assert.deepStrictEqual(M.sessionLine(null), { text: 'Civitai sign-in: unavailable', canSignIn: false });
+  assert.strictEqual(M.sessionLine({ available: true, signed_in: null, error: 'timeout' }).text, 'Civitai sign-in: unknown (timeout)');
+});
+
+test('the page wires the sign-in controls and shows the sign-in text only through textContent', () => {
+  const fs = require('node:fs');
+  const html = fs.readFileSync(__dirname + '/../web/index.html', 'utf8');
+  const js = fs.readFileSync(__dirname + '/../web/app.js', 'utf8');
+  assert.ok(html.includes('id="impSignIn"') && html.includes('id="impSessText"'));
+  assert.ok(js.includes("'/api/models/session/login'") && js.includes("$('#impSessText').textContent"));
+  assert.ok(js.includes('job.needs_signin'));
+});
