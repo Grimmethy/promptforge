@@ -65,6 +65,8 @@ async function boot() {
   $('#reroll').onclick = () => { $('#seed').value = -1; generate(); };
   $$('#inputs select, #inputs input, #inputs textarea').forEach(n => n.addEventListener('change', () => { persist(); schedulePreview(); }));
   $('#model').addEventListener('change', onModelChange);
+  $('#model').addEventListener('change', renderLoras);
+  initModelsPanel();
   $('#theme').addEventListener('change', applyThemeHints);
   $('#nsfw').addEventListener('change', onNsfwToggle);
   installAddBoxes();   // after the blanket change-listener so add-box inputs are excluded
@@ -679,6 +681,78 @@ async function savePose() {
 }
 
 // ------------------------------------------------------------- spec + preview
+// ---- LoRA picker and model import (web/models.js; server /api/loras and /api/models/*). Dynamic text is set with textContent, never HTML. ----
+let LORAS = { loras: [], checkpoints: {} };
+let loraRows = [];          // the chosen LoRAs: PFModels.newRow entries
+let _impPlan = null;        // the last checked import plan
+const isKreaModel = () => ($('#model').value || '').startsWith('krea2:');
+const currentBase = () => PFModels.baseOf(LORAS.checkpoints, $('#model').value);
+async function loadLoras() {
+  try { LORAS = await (await fetch('/api/loras')).json(); } catch (e) { LORAS = { loras: [], checkpoints: {} }; }
+  renderLoras();
+}
+function licBadge(l) { return PFModels.notForSale(l) ? el('span', { class: 'badge', title: 'Its licence does not clear selling images made with it' }, 'not for sale') : ''; }
+function renderLoras() {
+  const box = $('#loraRows'); if (!box) return;
+  box.textContent = '';
+  const krea = isKreaModel(), base = currentBase();
+  $('#loraPicker').hidden = false;
+  $('#loraAdd').hidden = $('#loraAddBtn').hidden = krea;
+  if (krea) { box.append(el('div', { class: 'muted' }, 'LoRAs here apply to Illustrious / SDXL models, not Krea 2.')); $('#loraWarn').textContent = ''; renderInstalled(); return; }
+  loraRows.forEach((r, i) => {
+    const w = el('input', { type: 'number', step: '0.05', min: '-2', max: '2', value: r.weight, title: 'weight (-2 to 2)' });
+    w.addEventListener('input', () => { r.weight = w.value; });
+    box.append(el('div', { class: 'lrow' }, [el('span', {}, r.name || r.id), w, el('span', { class: 'muted' }, (r.triggers || []).join(', ')), licBadge(r),
+      el('button', { type: 'button', class: 'small', onclick: () => { loraRows.splice(i, 1); renderLoras(); } }, 'Remove')]));
+  });
+  const sel = $('#loraAdd'); sel.textContent = '';
+  const opts = PFModels.available(LORAS.loras, base, loraRows.map(r => r.id));
+  sel.append(el('option', { value: '' }, opts.length ? 'choose a LoRA...' : 'no more LoRAs fit this model'));
+  opts.forEach(l => sel.append(el('option', { value: l.id }, l.name || l.id)));
+  const wrong = loraRows.filter(r => !PFModels.fits(r, base)).map(r => r.name || r.id);
+  $('#loraWarn').textContent = [wrong.length ? 'Made for another base model: ' + wrong.join(', ') : '', PFModels.sellWarning(loraRows)].filter(Boolean).join('  |  ');
+  renderInstalled();
+}
+function renderInstalled() {
+  const box = $('#installedLoras'); box.textContent = '';
+  box.append(el('div', { class: 'muted' }, 'Installed LoRAs'));
+  LORAS.loras.forEach(l => box.append(el('div', {}, [`${l.name || l.id} . ${l.base || '?'} . ${l.present ? 'installed' : 'file missing'}${(l.triggers || []).length ? ' . ' + l.triggers.join(', ') : ''} . ${(l.licence || {}).commercial_use || 'unverified'} `, licBadge(l)])));
+}
+function initModelsPanel() {
+  $('#loraAddBtn').onclick = () => {
+    const l = LORAS.loras.find(x => x.id === $('#loraAdd').value);
+    if (l) { loraRows.push(PFModels.newRow(l)); renderLoras(); }
+  };
+  $('#impCheck').onclick = async () => {
+    const out = $('#impPlan'); out.textContent = ''; $('#impGo').disabled = true; _impPlan = null;
+    $('#impProg').textContent = 'Checking the link... (the site can take a minute to answer)'; $('#impCheck').disabled = true;
+    try {
+      const r = await fetch('/api/models/plan', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: $('#impUrl').value.trim(), type: $('#impType').value || undefined }) });
+      const plan = await r.json();
+      if (!r.ok) { $('#impProg').textContent = 'Could not check it: ' + (plan.error || r.status); return; }
+      _impPlan = plan; $('#impProg').textContent = '';
+      PFModels.planRows(plan).forEach(row => out.append(el('tr', { class: row.warn ? 'warn' : '' }, [el('td', {}, row.label), el('td', {}, row.text)])));
+      $('#impGo').disabled = !PFModels.canImport(plan);
+    } catch (e) { $('#impProg').textContent = 'Could not check it: ' + e.message; }
+    finally { $('#impCheck').disabled = false; }
+  };
+  $('#impGo').onclick = async () => {
+    if (!_impPlan) return;
+    $('#impGo').disabled = true;
+    try {
+      const r = await fetch('/api/models/import', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: $('#impUrl').value.trim(), type: $('#impType').value || undefined, confirm: true }) });
+      const j = await r.json();
+      if (!r.ok) { $('#impProg').textContent = 'Not started: ' + (j.error || r.status); return; }
+      for (;;) {
+        const job = await (await fetch('/api/models/import/' + j.job)).json();
+        $('#impProg').textContent = PFModels.progressText(job);
+        if (job.status === 'done' || job.status === 'error') { if (job.status === 'done') { _impPlan = null; await loadLoras(); } break; }
+        await new Promise(res => setTimeout(res, 1000));
+      }
+    } catch (e) { $('#impProg').textContent = 'Failed: ' + e.message; }
+  };
+  loadLoras();
+}
 function buildSpec() {
   const chars = state.chars.map(c => ({
     source: c.source, name: c.name,
@@ -700,6 +774,7 @@ function buildSpec() {
     cn_strength: +$('#cn_strength').value, cn_end: +$('#cn_end').value,
     layout: $('#layout').value,
   };
+  if (loraRows.length && !isKreaModel()) spec.loras = PFModels.toSpec(loraRows);   // validated server-side against the registry and the LoRAs folder
   if (state.chars.length && editor) {
     // the editor already projected its 3-D rig through the orbit camera
     spec.skeleton = { people: editor.getFrame(spec.width, spec.height).people };
