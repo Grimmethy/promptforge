@@ -11,8 +11,10 @@ import logging
 import os
 import queue
 import re
+import threading
 import urllib.error
 import urllib.request
+import uuid
 import zipfile
 
 from flask import Flask, Response, jsonify, request, send_from_directory
@@ -20,6 +22,7 @@ from flask import Flask, Response, jsonify, request, send_from_directory
 from core import (assemble, cf_characters, clean, comfy, comfy_proc, data, events, gallery_chars, gpu_client, gpu_session, imgmeta, licenses, link_targets, pose_ops,
                   randomizer, rig, secondbrain, themes, thumbs)
 from core import loras as loras_mod
+from core import model_importer
 
 logger = logging.getLogger(__name__)
 
@@ -703,8 +706,79 @@ def loras_list():
         row = dict(e)
         row["present"] = os.path.isfile(os.path.join(folder, e.get("file", "")))
         row["fits"] = sorted(c for c, b in registry["checkpoints"].items() if b == e.get("base"))
+        row["licence"] = licenses.lookup(e.get("file", ""))      # what the model lets us sell (data/model-licenses.json)
         rows.append(row)
     return jsonify({"loras": rows, "checkpoints": registry["checkpoints"]})
+
+
+# ---- model importer (server/core/model_importer.py): check a link, then import it after an explicit confirm ----
+IMPORT_IO = {"fetcher": None, "downloader": None}      # tests put fakes here; None means the real network
+_imports = {}                                          # job id -> {status: planning|downloading|verifying|done|error, bytes, total, result, error}
+_import_lock = threading.Lock()
+_import_running = [None]
+_IMPORT_KEEP = 20
+
+
+@app.route("/api/models/plan", methods=["POST"])
+def models_plan():
+    """The importer's plan for a Civitai or Hugging Face link: what would be installed, where, its licence and warnings. Downloads nothing."""
+    b = request.get_json(silent=True) or {}
+    key = model_importer.load_key()
+    try:
+        plan = model_importer.fetch_plan(str(b.get("url") or ""), IMPORT_IO["fetcher"], key, type_override=b.get("type") or None)
+    except model_importer.ImportError_ as e:
+        return jsonify({"error": model_importer._scrub(e, key)}), 400
+    return jsonify(plan)
+
+
+@app.route("/api/models/import", methods=["POST"])
+def models_import():
+    """Import a model. Needs {url, confirm: true} (the boolean); the plan is rebuilt on the server, never taken from the browser. One import at a time."""
+    b = request.get_json(silent=True) or {}
+    if b.get("confirm") is not True:
+        return jsonify({"error": "confirm must be true: check the plan first, then confirm the import"}), 400
+    with _import_lock:
+        if _import_running[0]:
+            return jsonify({"error": "another import is running", "job": _import_running[0]}), 409
+        jid = uuid.uuid4().hex
+        _imports[jid] = {"id": jid, "status": "planning", "bytes": 0, "total": None, "result": None, "error": None}
+        _import_running[0] = jid
+        for old in list(_imports)[:-_IMPORT_KEEP]:
+            _imports.pop(old, None)
+    threading.Thread(target=_run_import, args=(_imports[jid], str(b.get("url") or ""), b.get("type") or None), daemon=True).start()
+    return jsonify({"job": jid}), 202
+
+
+def _run_import(job, url, type_override):
+    key = model_importer.load_key()
+    try:
+        plan = model_importer.fetch_plan(url, IMPORT_IO["fetcher"], key, type_override=type_override)
+        job["status"], job["total"] = "downloading", plan["file"].get("size_bytes")
+        real = IMPORT_IO["downloader"] or model_importer.default_downloader
+
+        def download(u, dest, headers, max_bytes, progress):
+            n = real(u, dest, headers, max_bytes, progress)
+            job["status"] = "verifying"
+            return n
+
+        def progress(got, total):
+            job["bytes"] = got
+            job["total"] = total or job["total"]
+        job["result"] = model_importer.execute_plan(plan, downloader=download, key=key, progress=progress)
+        job["status"] = "done"
+    except model_importer.ImportError_ as e:
+        job["status"], job["error"] = "error", model_importer._scrub(e, key)
+    except Exception as e:  # noqa: BLE001 - the job must always end, never leave the lock held
+        job["status"], job["error"] = "error", model_importer._scrub("unexpected error: %s" % e, key)
+    finally:
+        with _import_lock:
+            _import_running[0] = None
+
+
+@app.route("/api/models/import/<job>")
+def models_import_job(job):
+    rec = _imports.get(job)
+    return (jsonify(rec), 200) if rec else (jsonify({"error": "unknown job"}), 404)
 
 
 @app.route("/api/preview", methods=["POST"])
