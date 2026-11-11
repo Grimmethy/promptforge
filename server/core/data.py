@@ -32,7 +32,7 @@ NSFW_CN_KP_DIR = os.path.join(NSFW_CN_DIR, "keypoints")
 _NSFW_FLAG = os.path.join(NSFW_DIR, "enabled")
 
 CATEGORIES = ("poses", "positions", "styles", "backgrounds", "supporting",
-              "expressions", "colors")
+              "expressions", "colors", "tones")
 
 # Targets the UI's inline "add entry" boxes may write to (see add_entry).
 ALLOWED_ENTRY_TARGETS = frozenset(CATEGORIES) | {"outfits", "themes"}
