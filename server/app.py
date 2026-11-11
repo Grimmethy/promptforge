@@ -4,6 +4,7 @@ Serves web/ and a /api/* surface over the ported PromptForge core. Generation is
 delegated to ComfyUI (:8188) — see core/comfy.py (added next). Bind 127.0.0.1.
 """
 
+import io
 import json
 import math
 import logging
@@ -12,10 +13,11 @@ import queue
 import re
 import urllib.error
 import urllib.request
+import zipfile
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from core import (assemble, cf_characters, comfy, comfy_proc, data, events, gallery_chars, gpu_client, gpu_session, licenses, link_targets, pose_ops,
+from core import (assemble, cf_characters, clean, comfy, comfy_proc, data, events, gallery_chars, gpu_client, gpu_session, licenses, link_targets, pose_ops,
                   randomizer, rig, secondbrain, themes, thumbs)
 
 logger = logging.getLogger(__name__)
@@ -1080,6 +1082,61 @@ def gallery_assign(name):
     except link_targets.TargetUnreachable as e:
         return jsonify({"error": "%s is not reachable (%s). The image was not touched." % (tname, e), "results": []}), 502
     return jsonify({"target": tname, "results": results})
+
+
+_CLEAN_MIME = {"PNG": "image/png", "WEBP": "image/webp", "JPEG": "image/jpeg"}
+_CLEAN_MAX = 50
+
+
+def _clean_gallery_file(name):
+    """(clean bytes, report, download name) for gallery image relpath `name`; the gallery file is only read. Raises LookupError for a
+    bad or unknown path and clean.CleanError for a file that cannot be cleaned. Each clean copy is logged (source, hash, no prompt text)."""
+    p = _safe_gallery_path(name)
+    if not p or not os.path.isfile(p):
+        raise LookupError(name)
+    with open(p, "rb") as fh:
+        data = fh.read()
+    out, report = clean.strip_image(data)
+    clean.log_export("gallery:" + name, out, report["removed"])
+    return out, report, "clean_" + os.path.basename(p)
+
+
+@app.route("/api/gallery-clean/<path:name>")
+def gallery_clean(name):
+    """A clean copy of a gallery image (no embedded checkpoint, LoRAs, prompt or seed) as a download. The gallery original is not touched."""
+    try:
+        out, report, fname = _clean_gallery_file(name)
+    except LookupError:
+        return jsonify({"error": "not found"}), 404
+    except clean.CleanError as e:
+        return jsonify({"error": str(e)}), 415
+    return Response(out, mimetype=_CLEAN_MIME[report["format"]], headers={"Content-Disposition": 'attachment; filename="%s"' % fname})
+
+
+@app.route("/api/gallery-clean", methods=["POST"])
+def gallery_clean_many():
+    """POST {names: [relpath, ...]} (at most 50) -> a zip of clean copies."""
+    names = (request.get_json(silent=True) or {}).get("names")
+    if not isinstance(names, list) or not names or not all(isinstance(n, str) for n in names):
+        return jsonify({"error": "names must be a non-empty list of gallery paths"}), 400
+    if len(names) > _CLEAN_MAX:
+        return jsonify({"error": "at most %d images at once" % _CLEAN_MAX}), 400
+    buf, used = io.BytesIO(), set()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
+        for n in names:
+            try:
+                out, _report, fname = _clean_gallery_file(n)
+            except LookupError:
+                return jsonify({"error": "not found: %s" % n}), 404
+            except clean.CleanError as e:
+                return jsonify({"error": "%s: %s" % (n, e)}), 415
+            base, k = fname, 1
+            while fname in used:
+                k += 1
+                fname = "%d_%s" % (k, base)
+            used.add(fname)
+            z.writestr(fname, out)
+    return Response(buf.getvalue(), mimetype="application/zip", headers={"Content-Disposition": 'attachment; filename="clean_images.zip"'})
 
 
 @app.route("/api/gallery-meta/<path:name>")

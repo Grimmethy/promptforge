@@ -6,6 +6,8 @@ gallery/*
 .env
 # explicit-content overlay merged in only while the NSFW toggle is on
 data/nsfw/
+# internal log of clean image copies (names the source, never prompt text)
+data/clean-exports.jsonl
 
 # Agent Manager pipeline runtime data: written into the active project's repo, not source.
 graphify-out/

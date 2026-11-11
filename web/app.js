@@ -833,6 +833,7 @@ function openLB(file, meta) {
     (meta?.links || []).length ? el('div', { class: 'who' }, 'Linked to: ' + meta.links.map(l => (l.name || l.slug) + ' . ' + l.role).join(', ')) : '',
     el('button', { class: 'x', onclick: () => { $('#lightbox').classList.remove('on'); openRegen(file, meta); } }, '🎨 Regenerate from this image'),
     el('button', { class: 'x', onclick: () => openAssign(file, meta) }, '➕ Assign to…'),
+    el('a', { class: 'x', href: '/api/gallery-clean/' + file, download: '', title: 'A copy with no embedded checkpoint, LoRAs, prompt or seed. The original keeps its recipe.' }, '🧼 Download clean copy'),
     el('pre', { html: (p.positive || [p.region_a, p.region_b, p.base].filter(Boolean).join('\n\nBREAK\n')) || '' }),
     el('pre', { html: p.negative || '' }));
   $('#lightbox').classList.add('on');
