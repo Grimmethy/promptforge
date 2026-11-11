@@ -1,0 +1,11 @@
+# Tone: how a shot FEELS (expression, camera and lighting). One BREAK segment, merged into the scene tags next to the art style.
+# A tone is a short comma-separated tag string built from the expression, camera and lighting tags of the shared action-catalog tones
+# (serious, comedic, dramatic, mischievous, playful, somber). Keep them short - like styles they are strong tags.
+entries:
+  none: ""
+  serious: serious, stern, focused, medium shot, slightly low angle, dramatic lighting, high contrast
+  comedic: exaggerated expression, wide eyes, big grin, wide shot, dutch angle, bright even lighting
+  dramatic: intense expression, determined, cinematic framing, low angle, rim light, strong shadows
+  mischievous: smirk, sideways glance, raised eyebrow, close-up, slightly tilted frame, warm spotlight
+  playful: bright smile, open mouth, bouncy pose, medium shot, bright flat lighting
+  somber: downcast eyes, quiet expression, medium shot, eye level, overcast soft light, muted colors

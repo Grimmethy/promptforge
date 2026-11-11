@@ -242,6 +242,7 @@ def presets():
         "characters": {"preset": preset_chars, "secondbrain": sb_chars},
         "character_source": "characterforge" if cf else "local",
         "styles": data.list_entries("styles"),
+        "tones": data.list_entries("tones"),
         "backgrounds": data.list_entries("backgrounds"),
         "positions": data.list_entries("positions"),
         "poses": data.list_entries("poses"),
@@ -531,7 +532,8 @@ def resolve_job(spec):
     th = themes.resolve(spec.get("theme"))
     style_tags = _cat_tags("styles", spec.get("style")) or th["style"]
     setting_tags = _cat_tags("backgrounds", spec.get("setting")) or th["setting_bias"]
-    scene_tags = data.normalize_kw(setting_tags, style_tags, th["palette"], th["lighting"])
+    tone_tags = _cat_tags("tones", spec.get("tone"))   # optional: no tone assembles exactly as before (normalize_kw drops empty parts)
+    scene_tags = data.normalize_kw(setting_tags, style_tags, tone_tags, th["palette"], th["lighting"])
 
     chars = [c for c in (spec.get("characters") or []) if c][:2]
     n = len(chars)

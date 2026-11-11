@@ -35,6 +35,7 @@ async function boot() {
   fillSelect('#theme', PRESETS.themes.map(t => t.name));
   fillSelect('#setting', ['none', ...PRESETS.backgrounds.filter(x => x !== 'none')]);
   fillSelect('#style', ['none', ...PRESETS.styles.filter(x => x !== 'none')]);
+  fillSelect('#tone', ['none', ...(PRESETS.tones || []).filter(x => x !== 'none')]);
   fillSelect('#model', PRESETS.checkpoints.length ? PRESETS.checkpoints : ['(ComfyUI down)']);
   decorateModels();
   refreshPoseLib();
@@ -108,6 +109,7 @@ async function reloadPresets() {
   fillSelect('#theme', PRESETS.themes.map(t => t.name));
   fillSelect('#setting', ['none', ...PRESETS.backgrounds.filter(x => x !== 'none')]);
   fillSelect('#style', ['none', ...PRESETS.styles.filter(x => x !== 'none')]);
+  fillSelect('#tone', ['none', ...(PRESETS.tones || []).filter(x => x !== 'none')]);
   if ($('#nsfw')) $('#nsfw').checked = !!PRESETS.nsfw;
   refreshPoseLib();
   renderChars();
@@ -688,6 +690,7 @@ function buildSpec() {
     theme: $('#theme').value,
     setting: [$('#setting').value === 'none' ? '' : $('#setting').value, $('#settingText').value].filter(Boolean).join(', '),
     style: [$('#style').value === 'none' ? '' : $('#style').value, $('#styleText').value].filter(Boolean).join(', '),
+    tone: $('#tone').value === 'none' ? undefined : $('#tone').value,
     negative: $('#negative').value,
     model: $('#model').value.startsWith('(') ? undefined : $('#model').value,
     cfg: +$('#cfg').value, steps: +$('#steps').value,
@@ -1048,7 +1051,7 @@ function connectEvents() {
 // ------------------------------------------------------------- persistence
 function applySpec(spec) {
   state.chars = (spec.characters || []).map(c => normalizeChar({ ...blankChar(), ...c }));
-  for (const k of ['theme', 'model', 'sampler', 'scheduler'])
+  for (const k of ['theme', 'model', 'sampler', 'scheduler', 'tone'])
     if (spec[k] != null && $('#' + k)) $('#' + k).value = spec[k];
   for (const k of ['cfg', 'steps', 'seed', 'batch', 'width', 'height', 'cn_strength', 'cn_end'])
     if (spec[k] != null && $('#' + k)) $('#' + k).value = spec[k];
