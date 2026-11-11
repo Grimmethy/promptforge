@@ -822,6 +822,32 @@ function imgTile(file, meta = null, commercial = null, link = null) {
 }
 const mBtn = (t, title, fn) => el('button', { class: 'x', title, onclick: fn }, t);
 
+// the lightbox 'Recipe' section: loaded when opened, built with textContent only (a recipe is text from a file, never HTML)
+function recipeBox(file) {
+  const box = el('details', { class: 'recipe' }, [el('summary', {}, 'Recipe (checkpoint and LoRAs)')]);
+  let loaded = false;
+  box.addEventListener('toggle', async () => {
+    if (!box.open || loaded) return;
+    loaded = true;
+    try {
+      const rec = await (await fetch('/api/gallery-recipe/' + file)).json();
+      const rows = PFRecipe.summary(rec);
+      if (!rows.length) { box.append(el('div', { class: 'muted' }, 'This image carries no generation metadata.')); return; }
+      rows.forEach(r => box.append(el('div', {}, r.label + ': ' + r.text)));
+      box.append(el('button', { class: 'x', onclick: () => copyRecipeSpec(rec) }, 'Copy as spec'));
+    } catch (err) { box.append(el('div', { class: 'muted' }, 'Could not read the recipe.')); }
+  });
+  return box;
+}
+// fills the generate form's model when ComfyUI lists it and puts the whole spec (with the LoRA stack) on the clipboard
+function copyRecipeSpec(rec) {
+  const spec = PFRecipe.spec(rec);
+  if (!spec) return;
+  const sel = $('#model');
+  if (sel && spec.model && [...sel.options].some(o => o.value === spec.model)) { sel.value = spec.model; sel.dispatchEvent(new Event('change')); }
+  window.PFRecipeLoras = spec.loras || [];
+  if (navigator.clipboard) navigator.clipboard.writeText(JSON.stringify(spec, null, 2)).catch(() => {});
+}
 function openLB(file, meta) {
   $('#lbImg').src = '/api/image/' + file;               // full-res in the lightbox
   $('#lbInfo').innerHTML = '';
@@ -834,6 +860,7 @@ function openLB(file, meta) {
     el('button', { class: 'x', onclick: () => { $('#lightbox').classList.remove('on'); openRegen(file, meta); } }, '🎨 Regenerate from this image'),
     el('button', { class: 'x', onclick: () => openAssign(file, meta) }, '➕ Assign to…'),
     el('a', { class: 'x', href: '/api/gallery-clean/' + file, download: '', title: 'A copy with no embedded checkpoint, LoRAs, prompt or seed. The original keeps its recipe.' }, '🧼 Download clean copy'),
+    recipeBox(file),
     el('pre', { html: (p.positive || [p.region_a, p.region_b, p.base].filter(Boolean).join('\n\nBREAK\n')) || '' }),
     el('pre', { html: p.negative || '' }));
   $('#lightbox').classList.add('on');

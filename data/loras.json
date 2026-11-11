@@ -1,5 +1,5 @@
 {
-  "_readme": "LoRA registry for PromptForge. Each entry: id, name, file (as ComfyUI lists it in models/loras), base ('illustrious'|'pony'|'noobai'|'sdxl'|'krea2'|'anima'), triggers (words that must be in the prompt), default_weight, clip_skip (null when none), source_url, notes. `checkpoints` maps a checkpoint file name to its base so a LoRA of another base gives a warning; an unlisted checkpoint gives no base warning. The model importer fills this file.",
+  "_readme": "LoRA registry for PromptForge. Each entry: id, name, file (as ComfyUI lists it in models/loras), base ('illustrious'|'pony'|'noobai'|'sdxl'|'krea2'|'anima'), triggers (words that must be in the prompt), default_weight, clip_skip (null when none), source_url, notes. `checkpoints` maps a checkpoint file name to its base so a LoRA of another base gives a warning; an unlisted checkpoint gives no base warning. The model importer fills this file. An entry may list `aliases`: the display names other sites (Tungsten, Civitai) give the same file, used when reading an image's recipe.",
   "checkpoints": {
     "novaFurryXL_ilV140.safetensors": "illustrious",
     "WAI-Nsfw-Illustrious-17.safetensors": "illustrious",
@@ -17,7 +17,10 @@
       "default_weight": 0.55,
       "clip_skip": null,
       "source_url": null,
-      "notes": "Style LoRA; recipe weight 0.55 from the Gobs reference."
+      "notes": "Style LoRA; recipe weight 0.55 from the Gobs reference.",
+      "aliases": [
+        "[Style] SSB [Illustrious-XL] - v1"
+      ]
     },
     {
       "id": "exaggerated_pose",
@@ -32,7 +35,10 @@
       "default_weight": 0.55,
       "clip_skip": 2,
       "source_url": null,
-      "notes": "Pose LoRA; recipe weight 0.55 with clip skip 2."
+      "notes": "Pose LoRA; recipe weight 0.55 with clip skip 2.",
+      "aliases": [
+        "Exaggerated, Dynamic Fashion Pose - V1"
+      ]
     },
     {
       "id": "huffslove_anima",
