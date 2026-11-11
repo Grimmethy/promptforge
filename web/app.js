@@ -746,12 +746,31 @@ function initModelsPanel() {
       for (;;) {
         const job = await (await fetch('/api/models/import/' + j.job)).json();
         $('#impProg').textContent = PFModels.progressText(job);
-        if (job.status === 'done' || job.status === 'error') { if (job.status === 'done') { _impPlan = null; await loadLoras(); } break; }
+        if (job.status === 'done' || job.status === 'error') {
+          if (job.status === 'done') { _impPlan = null; await loadLoras(); }
+          if (job.needs_signin) { $('#impGo').disabled = false; refreshSession(true); }
+          break;
+        }
         await new Promise(res => setTimeout(res, 1000));
       }
     } catch (e) { $('#impProg').textContent = 'Failed: ' + e.message; }
   };
+  $('#impSignIn').onclick = async () => {
+    try {
+      const r = await fetch('/api/models/session/login', { method: 'POST' });
+      const j = await r.json();
+      $('#impProg').textContent = r.ok ? 'A Brave window opened: sign in to Civitai, then close it.' : 'Could not open the sign-in window: ' + (j.error || r.status);
+    } catch (e) { $('#impProg').textContent = 'Could not open the sign-in window: ' + e.message; }
+  };
+  $('#modelsBox').addEventListener('toggle', () => { if ($('#modelsBox').open && !_sessSeen) { _sessSeen = true; refreshSession(false); } });
   loadLoras();
+}
+let _sessSeen = false;
+async function refreshSession(fresh) {
+  try {
+    const s = PFModels.sessionLine(await (await fetch('/api/models/session' + (fresh ? '?refresh=1' : ''))).json());
+    $('#impSessText').textContent = s.text; $('#impSignIn').disabled = !s.canSignIn;
+  } catch (e) { $('#impSessText').textContent = 'Civitai sign-in: unknown'; }
 }
 function buildSpec() {
   const chars = state.chars.map(c => ({

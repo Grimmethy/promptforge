@@ -39,9 +39,16 @@
     if (job.status === 'error') return 'Failed: ' + (job.error || 'unknown error');
     if (job.status === 'done') return 'Installed ' + ((job.result || {}).file || '') + (job.result && job.result.registry_id ? ' (registry id ' + job.result.registry_id + ')' : '');
     const pct = job.total ? Math.min(100, Math.round(100 * (job.bytes || 0) / job.total)) + '% of ' + (job.total / MB).toFixed(0) + ' MB' : ((job.bytes || 0) / MB).toFixed(0) + ' MB';
+    if (job.status === 'downloading' && job.via === 'session') return 'Downloading through your signed-in Civitai session...';
     return { planning: 'Checking the link...', downloading: 'Downloading ' + pct, verifying: 'Verifying the file...' }[job.status] || job.status;
   };
-  const api = { fits, baseOf, available, newRow, toSpec, notForSale, sellWarning, planRows, canImport, progressText, weightOf };
+  const sessionLine = s => {
+    if (!s || s.available === false) return { text: 'Civitai sign-in: unavailable', canSignIn: false };
+    if (s.signed_in === true) return { text: 'Civitai sign-in: signed in', canSignIn: true };
+    if (s.signed_in === false) return { text: 'Civitai sign-in: not signed in', canSignIn: true };
+    return { text: 'Civitai sign-in: unknown' + (s.error ? ' (' + s.error + ')' : ''), canSignIn: true };
+  };
+  const api = { sessionLine, fits, baseOf, available, newRow, toSpec, notForSale, sellWarning, planRows, canImport, progressText, weightOf };
   root.PFModels = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

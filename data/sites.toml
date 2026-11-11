@@ -1,0 +1,4 @@
+# Sites the PromptForge model importer may sign in to by hand (same format as the site-sessions package).
+[site.civitai]
+url = "https://civitai.com/login"
+notes = "Sign in by hand; PromptForge never types or stores the password. Only the saved browser profile keeps the session."
