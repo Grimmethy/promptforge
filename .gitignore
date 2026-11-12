@@ -3,6 +3,8 @@ __pycache__/
 *.pyc
 gallery/*
 !gallery/.gitkeep
+# one-hour hand-offs from the library forges (a picture to tweak, an empty slot to fill)
+handoff/
 # pictures the owner saved to the Library (a copy, kept apart from the gallery that is swept)
 library/
 # the sweep's switch (the owner creates it) and its log

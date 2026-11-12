@@ -1,0 +1,643 @@
+{
+ "_comment": "Ten variations per image role for CharacterForge's library slots: what a plus card in the library sends to PromptForge. setting None means a plain parchment background; style None means the character's own render style. Copied from the slot-fill batch (fill_character_slots.py BANKS).",
+ "parchment": "plain pale parchment background, simple background",
+ "roles": {
+  "neutral-reference": [
+   {
+    "tag": "front-full",
+    "pose_keywords": "standing, facing viewer, full body, neutral pose",
+    "setting": "plain pale parchment background, simple background",
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "three-quarter-left",
+    "pose_keywords": "standing, three-quarter view, turned slightly left, full body",
+    "setting": "plain pale parchment background, simple background",
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "three-quarter-right",
+    "pose_keywords": "standing, three-quarter view, turned slightly right, full body",
+    "setting": "plain pale parchment background, simple background",
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "side-profile",
+    "pose_keywords": "standing, side profile, full body",
+    "setting": "plain pale parchment background, simple background",
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "back-view",
+    "pose_keywords": "standing, from behind, back view, full body",
+    "setting": "plain pale parchment background, simple background",
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "bust-portrait",
+    "pose_keywords": "portrait, head and shoulders, facing viewer",
+    "setting": "plain pale parchment background, simple background",
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "upper-body",
+    "pose_keywords": "upper body, facing viewer, relaxed",
+    "setting": "plain pale parchment background, simple background",
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "sitting-front",
+    "pose_keywords": "sitting on a plain stool, facing viewer, full body",
+    "setting": "plain pale parchment background, simple background",
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "low-angle",
+    "pose_keywords": "standing, low angle, looking down at viewer, full body",
+    "setting": "plain pale parchment background, simple background",
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "high-angle",
+    "pose_keywords": "standing, high angle, looking up at viewer, full body",
+    "setting": "plain pale parchment background, simple background",
+    "style": null,
+    "extra": ""
+   }
+  ],
+  "pose": [
+   {
+    "tag": "hands-on-hips",
+    "pose_keywords": "standing proudly, hands on hips, chin up",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "arms-crossed",
+    "pose_keywords": "standing, arms crossed, confident",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "leaning-on-wall",
+    "pose_keywords": "leaning against a wall, relaxed, one foot crossed",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "sitting-on-stool",
+    "pose_keywords": "sitting on a wooden stool, hands on knees",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "sitting-cross-legged",
+    "pose_keywords": "sitting cross-legged on the floor, relaxed",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "kneeling-one-knee",
+    "pose_keywords": "kneeling on one knee, heroic",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "over-shoulder",
+    "pose_keywords": "walking away, looking back over shoulder",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "stretching",
+    "pose_keywords": "stretching both arms overhead, yawning",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "crouching",
+    "pose_keywords": "crouching low, curious, looking at the ground",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "hero-stance",
+    "pose_keywords": "wide stance, one fist raised, heroic pose",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   }
+  ],
+  "action": [
+   {
+    "tag": "running",
+    "pose_keywords": "running, mid stride, dynamic, motion",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "jumping",
+    "pose_keywords": "jumping in the air, arms up, joyful",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "waving",
+    "pose_keywords": "waving hello with one hand, friendly",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "reading",
+    "pose_keywords": "reading a thick book, absorbed",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "drinking-tea",
+    "pose_keywords": "holding a steaming cup, sipping tea",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "carrying-crate",
+    "pose_keywords": "carrying a wooden crate in both arms, straining",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "climbing",
+    "pose_keywords": "climbing a rock wall, reaching up",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "dancing",
+    "pose_keywords": "dancing, spinning, arms out, happy",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "pointing",
+    "pose_keywords": "pointing ahead with one arm, shouting, urgent",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "cooking",
+    "pose_keywords": "stirring a big pot, apron on, steam rising",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   }
+  ],
+  "expression": [
+   {
+    "tag": "happy",
+    "pose_keywords": "big happy smile, eyes bright, portrait",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "sad",
+    "pose_keywords": "sad, teary eyes, downcast, portrait",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "surprised",
+    "pose_keywords": "surprised, wide eyes, open mouth, portrait",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "angry",
+    "pose_keywords": "angry, furrowed brows, gritted teeth, portrait",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "smug",
+    "pose_keywords": "smug smirk, one eyebrow raised, portrait",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "sleepy",
+    "pose_keywords": "sleepy, half closed eyes, yawning, portrait",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "worried",
+    "pose_keywords": "worried, biting lip, sweat drop, portrait",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "determined",
+    "pose_keywords": "determined, fierce eyes, set jaw, portrait",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "laughing",
+    "pose_keywords": "laughing out loud, eyes squeezed shut, portrait",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   },
+   {
+    "tag": "embarrassed",
+    "pose_keywords": "embarrassed, blushing, looking away, portrait",
+    "setting": null,
+    "style": null,
+    "extra": ""
+   }
+  ],
+  "outfit": [
+   {
+    "tag": "winter-coat",
+    "pose_keywords": "standing, full body",
+    "setting": "plain pale parchment background, simple background",
+    "style": null,
+    "extra": "wearing a thick winter coat, scarf and woollen hat"
+   },
+   {
+    "tag": "travel-cloak",
+    "pose_keywords": "standing, full body",
+    "setting": "plain pale parchment background, simple background",
+    "style": null,
+    "extra": "wearing a hooded travel cloak, satchel, sturdy boots"
+   },
+   {
+    "tag": "chef-apron",
+    "pose_keywords": "standing, full body",
+    "setting": "plain pale parchment background, simple background",
+    "style": null,
+    "extra": "wearing a white chef apron and a tall chef hat"
+   },
+   {
+    "tag": "formal-evening",
+    "pose_keywords": "standing, full body",
+    "setting": "plain pale parchment background, simple background",
+    "style": null,
+    "extra": "wearing elegant formal evening clothes"
+   },
+   {
+    "tag": "pajamas",
+    "pose_keywords": "standing, full body",
+    "setting": "plain pale parchment background, simple background",
+    "style": null,
+    "extra": "wearing cozy pajamas and a nightcap, holding a pillow"
+   },
+   {
+    "tag": "light-armor",
+    "pose_keywords": "standing, full body",
+    "setting": "plain pale parchment background, simple background",
+    "style": null,
+    "extra": "wearing light leather armor with a belt and bracers"
+   },
+   {
+    "tag": "festival-robes",
+    "pose_keywords": "standing, full body",
+    "setting": "plain pale parchment background, simple background",
+    "style": null,
+    "extra": "wearing colorful festival robes with ribbons"
+   },
+   {
+    "tag": "raincoat",
+    "pose_keywords": "standing, full body",
+    "setting": "plain pale parchment background, simple background",
+    "style": null,
+    "extra": "wearing a yellow raincoat and rubber boots, holding an umbrella"
+   },
+   {
+    "tag": "lodge-sweater",
+    "pose_keywords": "standing, full body",
+    "setting": "plain pale parchment background, simple background",
+    "style": null,
+    "extra": "wearing a chunky knit lodge sweater and plaid trousers"
+   },
+   {
+    "tag": "sun-hat-overalls",
+    "pose_keywords": "standing, full body",
+    "setting": "plain pale parchment background, simple background",
+    "style": null,
+    "extra": "wearing a wide sun hat and denim overalls"
+   }
+  ],
+  "cameo-variant": [
+   {
+    "tag": "anime-painterly",
+    "pose_keywords": "standing, full body",
+    "setting": "plain pale parchment background, simple background",
+    "style": "anime painterly",
+    "extra": ""
+   },
+   {
+    "tag": "muted-niji",
+    "pose_keywords": "standing, full body",
+    "setting": "plain pale parchment background, simple background",
+    "style": "muted niji",
+    "extra": ""
+   },
+   {
+    "tag": "flat-vector-sticker",
+    "pose_keywords": "standing, full body, sticker, white outline",
+    "setting": "plain white background",
+    "style": "flat vector sticker",
+    "extra": ""
+   },
+   {
+    "tag": "storybook",
+    "pose_keywords": "standing, full body, storybook illustration",
+    "setting": "plain pale parchment background, simple background",
+    "style": "anime clean",
+    "extra": "storybook illustration, soft colors"
+   },
+   {
+    "tag": "rubber-hose",
+    "pose_keywords": "standing, full body",
+    "setting": "plain white background",
+    "style": "flat vector sticker",
+    "extra": "1930s rubber hose cartoon style, bold black outlines, noodle limbs, white gloves"
+   },
+   {
+    "tag": "chibi",
+    "pose_keywords": "standing, full body, chibi, super deformed",
+    "setting": "plain white background",
+    "style": "anime clean",
+    "extra": "chibi proportions"
+   },
+   {
+    "tag": "watercolor-sketch",
+    "pose_keywords": "standing, full body, loose sketch",
+    "setting": "plain pale parchment background, simple background",
+    "style": "none",
+    "extra": "loose watercolor sketch, visible pencil lines"
+   },
+   {
+    "tag": "ink-wash",
+    "pose_keywords": "standing, full body",
+    "setting": "plain pale parchment background, simple background",
+    "style": "none",
+    "extra": "black ink wash painting, minimal color"
+   },
+   {
+    "tag": "pixel-art",
+    "pose_keywords": "standing, full body, pixel art",
+    "setting": "plain white background",
+    "style": "none",
+    "extra": "pixel art sprite, limited palette"
+   },
+   {
+    "tag": "noir",
+    "pose_keywords": "standing, full body",
+    "setting": "plain grey background",
+    "style": "high contrast noir",
+    "extra": ""
+   }
+  ],
+  "storyboard-still": [
+   {
+    "tag": "cozy-lodge",
+    "pose_keywords": "sitting by a fireplace, wide shot",
+    "setting": "cozy log lodge interior, warm firelight, wooden beams",
+    "style": "anime painterly",
+    "extra": ""
+   },
+   {
+    "tag": "forest-clearing",
+    "pose_keywords": "walking along a path, wide shot",
+    "setting": "sunlit forest clearing, tall pines, wildflowers",
+    "style": "anime painterly",
+    "extra": ""
+   },
+   {
+    "tag": "market-square",
+    "pose_keywords": "browsing stalls, wide shot",
+    "setting": "busy fantasy market square, striped awnings, lanterns",
+    "style": "anime painterly",
+    "extra": ""
+   },
+   {
+    "tag": "mountain-road",
+    "pose_keywords": "walking on a road, wide shot",
+    "setting": "mountain road, snow peaks, blue sky",
+    "style": "anime painterly",
+    "extra": ""
+   },
+   {
+    "tag": "riverside",
+    "pose_keywords": "sitting on a rock, wide shot",
+    "setting": "quiet riverside, willow trees, golden evening light",
+    "style": "anime painterly",
+    "extra": ""
+   },
+   {
+    "tag": "snowy-village",
+    "pose_keywords": "standing in the snow, wide shot",
+    "setting": "snowy village street, glowing windows, falling snow",
+    "style": "anime painterly",
+    "extra": ""
+   },
+   {
+    "tag": "library",
+    "pose_keywords": "reading between tall shelves, wide shot",
+    "setting": "towering old library, ladders, dusty sunbeams",
+    "style": "anime painterly",
+    "extra": ""
+   },
+   {
+    "tag": "kitchen",
+    "pose_keywords": "standing at a counter, wide shot",
+    "setting": "warm rustic kitchen, copper pots, steam",
+    "style": "anime painterly",
+    "extra": ""
+   },
+   {
+    "tag": "festival-night",
+    "pose_keywords": "walking among lanterns, wide shot",
+    "setting": "night festival, hanging lanterns, fireflies",
+    "style": "anime painterly",
+    "extra": ""
+   },
+   {
+    "tag": "rainy-street",
+    "pose_keywords": "standing under an awning, wide shot",
+    "setting": "rainy cobblestone street, puddles, warm shop lights",
+    "style": "anime painterly",
+    "extra": ""
+   }
+  ],
+  "other": [
+   {
+    "tag": "holding-lantern",
+    "pose_keywords": "holding up a glowing lantern, looking around",
+    "setting": "dark cave entrance",
+    "style": "anime painterly",
+    "extra": ""
+   },
+   {
+    "tag": "with-small-pet",
+    "pose_keywords": "kneeling, petting a small friendly animal companion",
+    "setting": "meadow",
+    "style": "anime painterly",
+    "extra": ""
+   },
+   {
+    "tag": "autumn",
+    "pose_keywords": "standing among falling leaves",
+    "setting": "autumn forest, orange leaves",
+    "style": "anime painterly",
+    "extra": "wearing autumn clothes"
+   },
+   {
+    "tag": "winter",
+    "pose_keywords": "standing, breath visible in the cold",
+    "setting": "snowy field, soft light",
+    "style": "anime painterly",
+    "extra": "wearing winter clothes"
+   },
+   {
+    "tag": "spring",
+    "pose_keywords": "standing among blossoms",
+    "setting": "spring orchard, cherry blossom petals",
+    "style": "anime painterly",
+    "extra": "wearing light spring clothes"
+   },
+   {
+    "tag": "summer",
+    "pose_keywords": "standing, shading eyes with one hand",
+    "setting": "sunny beach, blue water",
+    "style": "anime painterly",
+    "extra": "wearing light summer clothes"
+   },
+   {
+    "tag": "holiday",
+    "pose_keywords": "holding a wrapped gift, festive",
+    "setting": "decorated room, string lights, pine garland",
+    "style": "anime painterly",
+    "extra": "wearing festive clothes"
+   },
+   {
+    "tag": "tea-time",
+    "pose_keywords": "sitting at a small table, pouring tea",
+    "setting": "garden table, teapot, pastries",
+    "style": "anime painterly",
+    "extra": ""
+   },
+   {
+    "tag": "adventure-pack",
+    "pose_keywords": "adjusting a heavy backpack, ready to travel",
+    "setting": "trailhead at dawn",
+    "style": "anime painterly",
+    "extra": "carrying a big adventure backpack"
+   },
+   {
+    "tag": "sleeping",
+    "pose_keywords": "asleep in an armchair, blanket, peaceful",
+    "setting": "cozy corner, lamp, bookshelf",
+    "style": "anime painterly",
+    "extra": ""
+   }
+  ]
+ },
+ "clothing_words": [
+  "overall",
+  "hat",
+  "cap",
+  "hood",
+  "shirt",
+  "sleeve",
+  "boot",
+  "shoe",
+  "cloak",
+  "robe",
+  "dress",
+  "skirt",
+  "coat",
+  "jacket",
+  "vest",
+  "tunic",
+  "scarf",
+  "glove",
+  "belt",
+  "apron",
+  "armor",
+  "armour",
+  "cape",
+  "shorts",
+  "pants",
+  "trouser",
+  "sweater",
+  "hoodie",
+  "backpack",
+  "suit",
+  "tie",
+  "collar",
+  "corset",
+  "gown",
+  "bracer",
+  "pauldron",
+  "mail"
+ ],
+ "expression_words": [
+  "expression",
+  "mouth",
+  "smile",
+  "smiling",
+  "frown",
+  "grin",
+  "smirk",
+  "eyes closed",
+  "calm face"
+ ],
+ "negative_extra": "nude, naked, nsfw, topless, bottomless, nipples, genitals, pubic hair, sexual, blood, gore, text, watermark, signature, multiple views, cropped",
+ "role_order": [
+  "neutral-reference",
+  "pose",
+  "action",
+  "expression",
+  "outfit",
+  "cameo-variant",
+  "storyboard-still",
+  "other"
+ ]
+}
