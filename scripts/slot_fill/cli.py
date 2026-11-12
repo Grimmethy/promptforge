@@ -1,8 +1,9 @@
-"""The slot-fill commands: `python -m scripts.slot_fill run|status --forge characters|objects ...` (run it from the repo root with the repo's .venv).
+"""The slot-fill commands: `python -m scripts.slot_fill run|status|report --forge characters|objects ...` (run it from the repo root with the repo's .venv).
 
 run     fill the slots breadth first (see engine.run). It asks forge-mode to pause the pipeline first and to restore it last when that command exists, takes the PromptForge GPU
         session before the engine and releases it after (also on an error). --dry-run only prints the plan and changes nothing.
 status  slots filled and open per entry and role, and the disk used by the pictures the manifest names.
+report  write data/slot-fill-runs/<stamp>/summary.md and one contact sheet per entry for the last run (--since ISO picks the rows by time) and print the summary path.
 """
 import argparse
 import json
@@ -11,7 +12,7 @@ import shutil
 import subprocess
 import sys
 
-from . import engine, headroom
+from . import engine, headroom, report
 from .adapters.characterforge import CharacterForgeAdapter
 from .adapters.objectforge import ObjectForgeAdapter
 from .adapter import Adapter  # noqa: F401  (documented interface)
@@ -80,14 +81,16 @@ def status(adapter, state_dir, gallery_dir, out=print):
     return 0
 
 
-def main(argv=None, adapters=None, pf=None, run=engine.run, forge_mode_fn=forge_mode, state_dir=None, gallery_dir=None, out=print, err=None):
+def main(argv=None, adapters=None, pf=None, run=engine.run, forge_mode_fn=forge_mode, state_dir=None, gallery_dir=None, out=print, err=None, report_fn=report.make_report, out_root=None):
     err = err or (lambda m: print(m, file=sys.stderr))
     adapters = adapters or {"characters": CharacterForgeAdapter, "objects": ObjectForgeAdapter}
     ap = argparse.ArgumentParser(prog="python -m scripts.slot_fill")
     sub = ap.add_subparsers(dest="cmd")
-    for name in ("run", "status"):
+    for name in ("run", "status", "report"):
         p = sub.add_parser(name)
         p.add_argument("--forge", default="characters", choices=sorted(adapters))
+        if name == "report":
+            p.add_argument("--since", default=None)
         if name == "run":
             p.add_argument("--slugs", default="")
             p.add_argument("--round-from", type=int, default=1)
@@ -98,14 +101,17 @@ def main(argv=None, adapters=None, pf=None, run=engine.run, forge_mode_fn=forge_
         a = ap.parse_args(argv)
     except SystemExit as e:
         return int(e.code or 0)
-    if a.cmd not in ("run", "status"):
-        err("usage: python -m scripts.slot_fill run|status --forge characters|objects [--slugs a,b] [--round-from N] [--round-to M] [--limit N] [--dry-run]")
+    if a.cmd not in ("run", "status", "report"):
+        err("usage: python -m scripts.slot_fill run|status|report --forge characters|objects [--slugs a,b] [--round-from N] [--round-to M] [--limit N] [--dry-run]")
         return 2
     sd = state_dir or engine.STATE_DIR
     try:
         adapter = adapters[a.forge]()
         if a.cmd == "status":
             return status(adapter, sd, gallery_dir, out)
+        if a.cmd == "report":
+            out(report_fn(adapter.name, adapter=adapter, state_dir=state_dir, gallery_dir=gallery_dir, out_root=out_root, since=a.since))
+            return 0
         pf = pf or PFClient()
         kw = dict(slugs=[s for s in a.slugs.split(",") if s], round_from=a.round_from, round_to=a.round_to, limit=a.limit, state_dir=state_dir)
         if a.dry_run:
