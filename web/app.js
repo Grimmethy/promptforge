@@ -958,8 +958,12 @@ function openLB(file, meta) {
     el('pre', { html: (p.positive || [p.region_a, p.region_b, p.base].filter(Boolean).join('\n\nBREAK\n')) || '' }),
     el('pre', { html: p.negative || '' }));
   $('#lightbox').classList.add('on');
+  $('#lightbox').scrollTop = 0;                         // the phone layout scrolls: land on the picture
 }
-$('#lightbox').onclick = e => { if (e.target.id === 'lightbox') e.currentTarget.classList.remove('on'); };
+// one way to close the expanded picture: the corner X, a tap on the dark backdrop and Escape all come here
+function closeLB() { $('#lightbox').classList.remove('on'); }
+$('#lightbox').onclick = e => { if (e.target.id === 'lightbox') closeLB(); };
+$('#lbClose').onclick = closeLB;
 
 // ---- assign a gallery image to entries in another forge (CharacterForge): the server COPIES it, the gallery keeps its file (assign-model.js) ----
 let _asg = null;   // the open panel's state: {file, target, sel:Set, counts:{slug:{role:n}}, query, results}
@@ -1072,7 +1076,11 @@ $('#regenRun').onclick = runRegen;
 $('#regenCancel').onclick = closeRegen;
 $('#regenDenoise').oninput = e => { $('#regenDenoiseVal').textContent = Number(e.target.value).toFixed(2); };
 $('#regenPanel').onclick = e => { if (e.target.id === 'regenPanel') closeRegen(); };
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#regenPanel').classList.contains('on')) closeRegen(); });
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if ($('#regenPanel').classList.contains('on')) closeRegen();                                    // the regenerate panel keeps its own Escape
+  else if ($('#lightbox').classList.contains('on') && !$('#assignPanel').classList.contains('on')) closeLB();
+});
 
 // ---- paged gallery with a shimmering skeleton loader ----
 let _galOffset = 0, _galTotal = 0, _galLoading = false;
