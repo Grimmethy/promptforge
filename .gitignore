@@ -19,3 +19,5 @@ data/clean-exports.jsonl
 # Agent Manager pipeline runtime data: written into the active project's repo, not source.
 graphify-out/
 task-logs/
+# the slot-fill engine's run reports and contact sheets (generated, kept out of git)
+data/slot-fill-runs/
