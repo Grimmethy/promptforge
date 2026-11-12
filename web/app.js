@@ -58,9 +58,10 @@ async function boot() {
   };
   $('#orientReset').onclick = () => editor.resetView();
   // Phone layout: the Create / Gallery bar shows one panel at a time (style.css, body.view-gallery). A choice survives a reload.
-  const showView = v => { document.body.classList.toggle('view-gallery', v === 'gallery'); $$('#viewBar button').forEach(b => b.classList.toggle('on', b.dataset.view === v)); try { localStorage.setItem('pfView', v); } catch (e) { /* private mode: not remembered */ } };
+  const showView = v => { document.body.classList.toggle('view-gallery', v === 'gallery'); document.body.classList.toggle('view-library', v === 'library'); $$('#areaSwitch button').forEach(b => b.classList.toggle('on', (b.dataset.area === 'library') === (v === 'library'))); if (v === 'library') loadLibrary(); $$('#viewBar button').forEach(b => b.classList.toggle('on', b.dataset.view === v)); try { localStorage.setItem('pfView', v); } catch (e) { /* private mode: not remembered */ } };
   $$('#viewBar button').forEach(b => { b.onclick = () => showView(b.dataset.view); });
-  showView((() => { try { return localStorage.getItem('pfView') === 'gallery' ? 'gallery' : 'create'; } catch (e) { return 'create'; } })());
+  $$('#areaSwitch button').forEach(b => { b.onclick = () => showView(b.dataset.area === 'library' ? 'library' : 'gallery'); });
+  showView((() => { try { const v = localStorage.getItem('pfView'); return v === 'gallery' || v === 'library' ? v : 'create'; } catch (e) { return 'create'; } })());
   $('#generate').onclick = generate;
   $('#reroll').onclick = () => { $('#seed').value = -1; generate(); };
   $$('#inputs select, #inputs input, #inputs textarea').forEach(n => n.addEventListener('change', () => { persist(); schedulePreview(); }));
@@ -953,6 +954,7 @@ function openLB(file, meta) {
     (meta?.links || []).length ? el('div', { class: 'who' }, 'Linked to: ' + meta.links.map(l => (l.name || l.slug) + ' . ' + l.role).join(', ')) : '',
     el('button', { class: 'x', onclick: () => { $('#lightbox').classList.remove('on'); openRegen(file, meta); } }, '🎨 Regenerate from this image'),
     el('button', { class: 'x', onclick: () => openAssign(file, meta) }, '➕ Assign to…'),
+    saveToLibraryButton(file),
     el('a', { class: 'x', href: '/api/gallery-clean/' + file, download: '', title: 'A copy with no embedded checkpoint, LoRAs, prompt or seed. The original keeps its recipe.' }, '🧼 Download clean copy'),
     recipeBox(file),
     el('pre', { html: (p.positive || [p.region_a, p.region_b, p.base].filter(Boolean).join('\n\nBREAK\n')) || '' }),
@@ -1081,6 +1083,69 @@ document.addEventListener('keydown', e => {
   if ($('#regenPanel').classList.contains('on')) closeRegen();                                    // the regenerate panel keeps its own Escape
   else if ($('#lightbox').classList.contains('on') && !$('#assignPanel').classList.contains('on')) closeLB();
 });
+
+// ---- the Library: pictures worth keeping (server/core/library.py); the gallery is swept, the Library is not ----
+let _libItems = [], _libSaved = new Set();
+async function refreshLibrarySet() {
+  try { _libItems = (await fetch('/api/library').then(r => r.json())).items || []; _libSaved = PFLibrary.savedSet(_libItems); } catch (e) { /* the Library is optional: no badge then */ }
+}
+function renderLibrary() {
+  const grid = $('#libGrid'), q = $('#libSearch').value, tag = $('#libTag').value;
+  const tags = PFLibrary.tagCounts(_libItems), sel = $('#libTag');
+  if ([...sel.options].map(o => o.value).join('|') !== ['', ...tags.map(t => t.tag)].join('|')) {
+    sel.replaceChildren(el('option', { value: '' }, 'all tags'), ...tags.map(t => el('option', { value: t.tag }, `${t.tag} (${t.count})`)));
+    sel.value = tags.some(t => t.tag === tag) ? tag : '';
+  }
+  const shown = PFLibrary.sortNewest(PFLibrary.filterItems(_libItems, q, sel.value));
+  $('#libCount').textContent = `${shown.length} of ${_libItems.length}`;
+  grid.replaceChildren(...(shown.length ? shown.map(libTile) : [el('div', { class: 'libempty' }, _libItems.length ? 'Nothing matches.' : 'Nothing saved yet: open a picture in the Gallery and press Save to Library.')]));
+}
+function libTile(it) {
+  const cap = el('div', { class: 'cap' });
+  cap.append(el('div', {}, it.note || ''), el('div', { class: 'tags' }, (it.tags || []).join(' · ')));
+  return el('div', { class: 'libitem', onclick: () => openLibraryItem(it.id) }, [el('img', { src: `/api/library/${it.id}/image`, loading: 'lazy', alt: '' }), cap]);
+}
+async function loadLibrary() { await refreshLibrarySet(); renderLibrary(); }
+function openLibraryItem(id) {
+  const it = _libItems.find(x => x.id === id);
+  if (!it) return;
+  $('#lbImg').src = `/api/library/${id}/image`;
+  const note = el('input', { type: 'text', value: it.note || '', placeholder: 'note' }), tags = el('input', { type: 'text', value: (it.tags || []).join(', '), placeholder: 'tags, separated by commas' });
+  const save = el('button', { class: 'x', onclick: async () => {
+    const r = await fetch(`/api/library/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note: note.value, tags: PFLibrary.parseTags(tags.value) }) });
+    if (r.ok) { toast('Saved'); await loadLibrary(); } else toast('could not save');
+  } }, 'Save note and tags');
+  const remove = el('button', { class: 'x', onclick: async () => {
+    if (!confirm('Remove this picture from the Library? It is deleted after 1 day. The gallery copy (if it is still there) is not touched.')) return;
+    const r = await fetch(`/api/library/${id}`, { method: 'DELETE' });
+    if (r.ok) { closeLB(); toast('Removed'); await loadLibrary(); } else toast('could not remove');
+  } }, 'Remove from the Library');
+  $('#lbInfo').replaceChildren(el('div', {}, `from the gallery: ${it.file}`), el('div', { class: 'libedit' }, [note, tags, save, remove]));
+  $('#lightbox').classList.add('on'); $('#lightbox').scrollTop = 0;
+}
+function saveToLibraryButton(file) {
+  const saved = _libSaved.has(file);
+  const b = el('button', { class: 'x' }, saved ? '📚 In the Library' : '📚 Save to Library');
+  if (saved) { b.disabled = true; return b; }
+  b.onclick = async () => {
+    const note = prompt('Note for the Library (optional):'); if (note === null) return;            // Cancel (or Escape) saves nothing
+    const tags = prompt('Tags, separated by commas (optional):'); if (tags === null) return;
+    const r = await fetch('/api/library', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file, note, tags: PFLibrary.parseTags(tags) }) });
+    if (r.ok) { toast('Saved to the Library'); b.textContent = '📚 In the Library'; b.disabled = true; await refreshLibrarySet(); markLibraryBadges(); } else toast('could not save to the Library');
+  };
+  return b;
+}
+function markLibraryBadges() {
+  $$('#gallery .tile').forEach(t => {
+    const saved = _libSaved.has(t.dataset.file), badge = t.querySelector('.libbadge');
+    if (saved && !badge) t.append(el('span', { class: 'libbadge', title: 'Saved in the Library' }, '📚'));
+    else if (!saved && badge) badge.remove();
+  });
+}
+$('#libSearch').oninput = renderLibrary;
+$('#libTag').onchange = renderLibrary;
+refreshLibrarySet().then(markLibraryBadges);
+new MutationObserver(() => markLibraryBadges()).observe($('#gallery'), { childList: true });   // tiles arrive page by page: badge each new one
 
 // ---- paged gallery with a shimmering skeleton loader ----
 let _galOffset = 0, _galTotal = 0, _galLoading = false;
