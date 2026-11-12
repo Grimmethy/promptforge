@@ -1,0 +1,9 @@
+{
+  "_comment": "Places where OTHER forges save PromptForge gallery picture names (like 2026-11/abcd1234_0.png). The sweep never deletes a picture whose name appears in any of these files: it copies it into the Library instead. repo is a folder name under PROMPTFORGE_FORGES_ROOT (default: the folder that holds this repo); globs are relative to that repo. CharacterForge is deliberately NOT listed: its linked pictures are independent copies, and its neutral.json and linked records only name the gallery file as provenance.",
+  "sources": [
+    {"forge": "storyforge", "repo": "storyforge", "globs": ["stories/*.json", "StoryImages/**/*.json"]},
+    {"forge": "sceneforge", "repo": "sceneforge", "globs": ["data/**/*.json"]},
+    {"forge": "videoforge", "repo": "videoforge", "globs": ["data/**/*.json", "stories/*.json"]},
+    {"forge": "cutforge", "repo": "cutforge", "globs": ["data/**/*.json"]}
+  ]
+}

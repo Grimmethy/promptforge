@@ -20,7 +20,7 @@ import zipfile
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from core import (assemble, cf_characters, clean, library, comfy, comfy_proc, data, events, gallery_chars, gpu_client, gpu_session, imgmeta, licenses, link_targets, pose_ops,
+from core import (assemble, cf_characters, clean, gallery_refs, gallery_sweep, library, comfy, comfy_proc, data, events, gallery_chars, gpu_client, gpu_session, imgmeta, licenses, link_targets, pose_ops,
                   randomizer, rig, secondbrain, themes, thumbs)
 from core import loras as loras_mod
 from core import model_importer
@@ -1072,7 +1072,7 @@ def _gallery_pngs():
     show_nsfw = data.nsfw_enabled()
     rows = []
     for root, dirs, files in os.walk(GALLERY_DIR):
-        dirs[:] = [d for d in dirs if d != thumbs.THUMB_SUBDIR]
+        dirs[:] = [d for d in dirs if d != thumbs.THUMB_SUBDIR and not d.startswith('.')]     # .thumbs, and the sweep's .trash
         for f in files:
             if f.endswith(".png"):
                 fp = os.path.join(root, f)
@@ -1397,7 +1397,33 @@ def library_image(iid):
     return send_from_directory(os.path.dirname(p), os.path.basename(p))
 
 
+# ---- the 7-day gallery sweep (server/core/gallery_sweep.py): a dry run by default, switched on only by the owner ----
+@app.route("/api/sweep/plan")
+def sweep_plan():
+    return jsonify(gallery_sweep.plan(gallery_dir=GALLERY_DIR))
+
+
+@app.route("/api/sweep/enable", methods=["POST"])
+def sweep_enable():
+    return jsonify({"enabled": gallery_sweep.set_enabled(True)})
+
+
+@app.route("/api/sweep/disable", methods=["POST"])
+def sweep_disable():
+    return jsonify({"enabled": gallery_sweep.set_enabled(False)})
+
+
+@app.route("/api/sweep/run", methods=["POST"])
+def sweep_run():
+    try:
+        return jsonify(gallery_sweep.apply(gallery_dir=GALLERY_DIR))
+    except gallery_sweep.SweepOff as e:
+        return jsonify({"error": str(e)}), 403
+
+
 if __name__ == "__main__":
+    if gallery_sweep.enabled():
+        gallery_sweep.apply(gallery_dir=GALLERY_DIR)      # only when the owner switched the sweep on
     library.purge_trash()
     os.makedirs(GALLERY_DIR, exist_ok=True)
     app.run(host="127.0.0.1", port=int(os.environ.get("PROMPTFORGE_PORT", 7430)),
