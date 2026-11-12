@@ -3,6 +3,8 @@ __pycache__/
 *.pyc
 gallery/*
 !gallery/.gitkeep
+# pictures the owner saved to the Library (a copy, kept apart from the gallery that is swept)
+library/
 .env
 # explicit-content overlay merged in only while the NSFW toggle is on
 data/nsfw/
