@@ -20,7 +20,7 @@ import zipfile
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from core import (assemble, cf_characters, clean, comfy, comfy_proc, data, events, gallery_chars, gpu_client, gpu_session, imgmeta, licenses, link_targets, pose_ops,
+from core import (assemble, cf_characters, clean, library, comfy, comfy_proc, data, events, gallery_chars, gpu_client, gpu_session, imgmeta, licenses, link_targets, pose_ops,
                   randomizer, rig, secondbrain, themes, thumbs)
 from core import loras as loras_mod
 from core import model_importer
@@ -1354,7 +1354,51 @@ def image(name):
     return send_from_directory(GALLERY_DIR, name)
 
 
+# ---- the Library: pictures worth keeping (server/core/library.py); the gallery itself is never changed by any of these ----
+def _library_error(e):
+    if isinstance(e, library.NotFound):
+        return jsonify({"error": str(e)}), 404
+    return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/library", methods=["GET", "POST"])
+def library_collection():
+    try:
+        if request.method == "GET":
+            return jsonify({"items": library.list_items(request.args.get("q", ""), request.args.get("tag", ""))})
+        b = request.get_json(silent=True) or {}
+        rec, created = library.save(b.get("file"), b.get("note", ""), b.get("tags", []), b.get("reason", "manual"), gallery_dir=GALLERY_DIR)
+        return jsonify(rec), (201 if created else 200)
+    except (library.LibraryError, library.NotFound) as e:
+        return _library_error(e)
+
+
+@app.route("/api/library/<iid>", methods=["GET", "PATCH", "DELETE"])
+def library_item(iid):
+    try:
+        if request.method == "DELETE":
+            library.remove(iid)
+            library.purge_trash()
+            return jsonify({"removed": iid})
+        if request.method == "PATCH":
+            b = request.get_json(silent=True) or {}
+            return jsonify(library.update(iid, b.get("note"), b.get("tags")))
+        return jsonify(library.get(iid))
+    except (library.LibraryError, library.NotFound) as e:
+        return _library_error(e)
+
+
+@app.route("/api/library/<iid>/image")
+def library_image(iid):
+    try:
+        p = library.picture_path(iid)
+    except (library.LibraryError, library.NotFound) as e:
+        return _library_error(e)
+    return send_from_directory(os.path.dirname(p), os.path.basename(p))
+
+
 if __name__ == "__main__":
+    library.purge_trash()
     os.makedirs(GALLERY_DIR, exist_ok=True)
     app.run(host="127.0.0.1", port=int(os.environ.get("PROMPTFORGE_PORT", 7430)),
             debug=bool(os.environ.get("PROMPTFORGE_DEBUG")), threaded=True)
