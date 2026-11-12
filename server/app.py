@@ -20,7 +20,7 @@ import zipfile
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from core import (assemble, cf_characters, clean, gallery_refs, gallery_sweep, library, comfy, comfy_proc, data, events, gallery_chars, gpu_client, gpu_session, imgmeta, licenses, link_targets, pose_ops,
+from core import (assemble, cf_characters, clean, gallery_refs, gallery_sweep, handoff, library, comfy, comfy_proc, data, events, gallery_chars, gpu_client, gpu_session, imgmeta, licenses, link_targets, pose_ops,
                   randomizer, rig, secondbrain, themes, thumbs)
 from core import loras as loras_mod
 from core import model_importer
@@ -1419,6 +1419,48 @@ def sweep_run():
         return jsonify(gallery_sweep.apply(gallery_dir=GALLERY_DIR))
     except gallery_sweep.SweepOff as e:
         return jsonify({"error": str(e)}), 403
+
+
+# ---- hand-offs from the library forges (server/core/handoff.py): a picture to tweak or an empty slot to fill; they live one hour ----
+def _handoff_error(e):
+    return jsonify({"error": str(e)}), (404 if isinstance(e, handoff.NotFound) else 400)
+
+
+@app.route("/api/handoff", methods=["POST"])
+def handoff_create():
+    try:
+        raw = request.form.get("payload") if request.files or request.form else None
+        payload = json.loads(raw) if raw else (request.get_json(silent=True) or {})
+        up = request.files.get("image")
+        data, ext = (None, ".png")
+        if up is not None:
+            data = up.stream.read(handoff.MAX_IMAGE_BYTES + 1)
+            ext = os.path.splitext(up.filename or "")[1] or {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}.get((up.mimetype or "").lower(), ".png")
+        hid = handoff.create(payload, data, ext)
+        return jsonify({"id": hid, "url": "/?handoff=" + hid}), 201
+    except ValueError as e:                       # HandoffError and bad JSON
+        return _handoff_error(e)
+
+
+@app.route("/api/handoff/<hid>")
+def handoff_get(hid):
+    try:
+        rec = handoff.get(hid)
+    except (handoff.HandoffError, handoff.NotFound) as e:
+        return _handoff_error(e)
+    out = handoff.resolve(rec)
+    if rec.get("image"):
+        out["image_url"] = "/api/handoff/%s/image" % hid
+    return jsonify({"id": hid, "payload": out})
+
+
+@app.route("/api/handoff/<hid>/image")
+def handoff_image(hid):
+    try:
+        p = handoff.image_path(hid)
+    except (handoff.HandoffError, handoff.NotFound) as e:
+        return _handoff_error(e)
+    return send_from_directory(os.path.dirname(p), os.path.basename(p))
 
 
 if __name__ == "__main__":

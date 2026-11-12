@@ -1032,12 +1032,12 @@ async function submitAssign({ replace, only }) {
 }
 
 // ---- regenerate from a gallery image (image-to-image through /api/regenerate, the picture is read on the server) ----
-let _regenFile = null;
+let _regenFile = null, _regenHandoff = null;   // the picture comes from a gallery path, or from a hand-off (a library picture sent over)
 function openRegen(file, meta) {
   _regenFile = file;
   const m = meta || {};
   const p = m.prompt_used || {};
-  $('#regenImg').src = '/api/image/' + file;
+  if (file) $('#regenImg').src = '/api/image/' + file;
   $('#regenPrompt').value = p.positive || [p.region_a, p.region_b, p.base].filter(Boolean).join('\n') || '';
   const sel = $('#regenModel');
   sel.innerHTML = '';
@@ -1050,13 +1050,14 @@ function openRegen(file, meta) {
   $('#regenPanel').classList.add('on');
   $('#regenPrompt').focus();
 }
-function closeRegen() { $('#regenPanel').classList.remove('on'); _regenFile = null; }
+function closeRegen() { $('#regenPanel').classList.remove('on'); _regenFile = null; _regenHandoff = null; }
 async function runRegen() {
   const prompt = $('#regenPrompt').value.trim();
-  if (!_regenFile) return;
+  if (!_regenFile && !_regenHandoff) return;
   if (!prompt) { toast('write a prompt first'); return; }
   const fd = new FormData();
-  fd.append('from_gallery', _regenFile);
+  if (_regenHandoff) fd.append('image', await fetch('/api/handoff/' + _regenHandoff + '/image').then(r => r.blob()), 'handoff.png');   // a picture sent over from a library
+  else fd.append('from_gallery', _regenFile);
   fd.append('prompt', prompt);
   fd.append('denoise', $('#regenDenoise').value);
   fd.append('seed', $('#regenSeed').value || '-1');
@@ -1292,6 +1293,28 @@ function restore() {
     state._rigs = (s.rigs && s.rigs.length) ? s.rigs : null;
     lastLibFrame = s.libFrame || null;
   } catch { state.chars = []; }
+}
+
+// ---- hand-offs from the library forges: a picture to tweak (opens the regenerate panel with it) or an empty slot to fill (fills the Create form) ----
+async function applyHandoff(hid) {
+  let h;
+  try { h = await fetch('/api/handoff/' + hid).then(r => r.ok ? r.json() : Promise.reject(r.status)); } catch (e) { toast('that hand-off is gone (they last an hour)'); return; }
+  const p = h.payload || {};
+  for (let i = 0; i < 50 && !($('#model') && $('#model').options.length); i++) await new Promise(r => setTimeout(r, 100));   // the form is filled by boot()
+  if (p.warning) toast(p.warning);
+  else applySpec(PFHandoff.specFromPayload(p));
+  if (p.kind === 'image' && p.image_url) { openRegen('', { prompt_used: { positive: p.prompt || '' }, model: p.model }); _regenFile = null; _regenHandoff = hid; $('#regenImg').src = p.image_url; if (typeof p.seed === 'number') $('#regenSeed').value = p.seed; }
+  toast(PFHandoff.describe(p));
+}
+window.addEventListener('message', (e) => {
+  let same = false;
+  try { same = new URL(e.origin).hostname === location.hostname; } catch (err) { same = false; }
+  const hid = same ? PFHandoff.idFromMessage(e.data) : null;
+  if (hid) applyHandoff(hid);
+});
+{
+  const hid = PFHandoff.idFromSearch(location.search);
+  if (hid) { history.replaceState(null, '', location.pathname); applyHandoff(hid); }       // the id is used once: a reload does not apply it again
 }
 
 boot();
