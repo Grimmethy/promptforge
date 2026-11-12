@@ -1296,11 +1296,13 @@ function restore() {
 }
 
 // ---- hand-offs from the library forges: a picture to tweak (opens the regenerate panel with it) or an empty slot to fill (fills the Create form) ----
+let bootDone = null;   // the promise of boot(): a hand-off waits for the whole boot (it ends by restoring the saved form state and re-rendering, which would overwrite a hand-off applied earlier)
 async function applyHandoff(hid) {
   let h;
   try { h = await fetch('/api/handoff/' + hid).then(r => r.ok ? r.json() : Promise.reject(r.status)); } catch (e) { toast('that hand-off is gone (they last an hour)'); return; }
   const p = h.payload || {};
-  for (let i = 0; i < 50 && !($('#model') && $('#model').options.length); i++) await new Promise(r => setTimeout(r, 100));   // the form is filled by boot()
+  for (let i = 0; i < 100 && !bootDone; i++) await new Promise(r => setTimeout(r, 50));   // boot() is called right after this script's top level has run
+  if (bootDone) { try { await bootDone; } catch (e) { /* a failed boot: apply on what there is */ } }
   if (p.warning) toast(p.warning);
   else applySpec(PFHandoff.specFromPayload(p));
   if (p.kind === 'image' && p.image_url) { openRegen('', { prompt_used: { positive: p.prompt || '' }, model: p.model }); _regenFile = null; _regenHandoff = hid; $('#regenImg').src = p.image_url; if (typeof p.seed === 'number') $('#regenSeed').value = p.seed; }
@@ -1317,7 +1319,7 @@ window.addEventListener('message', (e) => {
   if (hid) { history.replaceState(null, '', location.pathname); applyHandoff(hid); }       // the id is used once: a reload does not apply it again
 }
 
-boot();
+bootDone = boot();
 
 // ---- the gallery sweep box (server/core/gallery_sweep.py): a read-only plan and the owner's on/off switch; text only ----
 async function loadSweepPlan() {
