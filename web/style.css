@@ -217,3 +217,27 @@ details.presetEd textarea.yaml { width: 100%; margin: 6px 0; font: 11px/1.4 ui-m
 .asgres { margin-top: 8px; font-size: 12px; } .asgres .ok { color: #2e9d57; } .asgres .bad { color: #d9534f; } .asgrepl { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0; }
 #assignCard .row { display: flex; gap: 8px; margin-top: 12px; }
 .tile .lnk { position: absolute; left: 4px; bottom: 4px; max-width: calc(100% - 8px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; line-height: 1; padding: 2px 6px; border-radius: 8px; color: #fff; background: #2e7d6b; }
+
+/* Library view: the saved pictures take the gallery's place (body.view-library); the floating switch is for wide screens, the phone uses the view bar */
+#library { display: none; }
+body.view-library #gallery { display: none; }
+body.view-library #library { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow-y: auto; padding: 14px; }
+#areaSwitch { position: fixed; top: 10px; right: 22px; z-index: 5; display: flex; background: var(--panel2); border: 1px solid var(--border); border-radius: 18px; overflow: hidden; }
+#areaSwitch button { border: 0; background: none; color: var(--muted); padding: 6px 12px; font-size: 13px; cursor: pointer; }
+#areaSwitch button.on { color: var(--text); box-shadow: inset 0 -3px 0 var(--accent, #6ea8fe); }
+.libbar { display: flex; gap: 8px; align-items: center; margin: 0 0 12px; padding-right: 190px; }
+.libbar input { flex: 1; min-width: 0; }
+#libGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; align-items: start; }
+#libGrid .libitem { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; cursor: pointer; }
+#libGrid .libitem img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; display: block; background: var(--border); }
+#libGrid .libitem .cap { padding: 4px 6px; font-size: 11px; color: var(--muted); }
+#libGrid .libitem .tags { color: var(--text); }
+#libGrid .libempty { grid-column: 1 / -1; color: var(--muted); padding: 30px 6px; text-align: center; }
+.tile .libbadge { position: absolute; top: 4px; left: 4px; background: rgba(0,0,0,.65); color: #fff; border-radius: 10px; font-size: 11px; padding: 0 6px; line-height: 18px; }
+#lbInfo .libedit { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+@media (max-width: 860px) {
+  #areaSwitch { display: none; }
+  .libbar { padding-right: 0; flex-wrap: wrap; }
+  body.view-library #inputs { display: none; }
+  body.view-library #library { padding: 10px; }
+}
