@@ -1295,3 +1295,16 @@ function restore() {
 }
 
 boot();
+
+// ---- the gallery sweep box (server/core/gallery_sweep.py): a read-only plan and the owner's on/off switch; text only ----
+async function loadSweepPlan() {
+  try {
+    const p = await fetch('/api/sweep/plan').then(r => r.json());
+    $('#sweepState').textContent = p.enabled ? '(ON)' : '(off)';
+    $('#sweepText').textContent = `${p.candidates} pictures (${(p.bytes / 1e9).toFixed(2)} GB) are older than ${p.age_days} days and would be moved to the trash; ${p.protected_referenced} are protected because other forges use them (they are saved to the Library instead); ${p.already_in_library} are already in the Library; ${p.younger_than_7_days} are newer. ` + (p.enabled ? 'The sweep is ON: it runs at server start and when asked.' : 'The sweep is OFF: this is only a preview.');
+    $('#sweepEnable').disabled = !!p.enabled; $('#sweepDisable').disabled = !p.enabled;
+  } catch (e) { $('#sweepText').textContent = 'Could not read the sweep plan.'; }
+}
+$('#sweepBox').addEventListener('toggle', () => { if ($('#sweepBox').open) loadSweepPlan(); });
+$('#sweepEnable').onclick = async () => { if (!confirm('Switch the 7-day gallery sweep ON? Pictures older than 7 days that are not in the Library go to the trash (deleted after 1 day).')) return; await fetch('/api/sweep/enable', { method: 'POST' }); loadSweepPlan(); };
+$('#sweepDisable').onclick = async () => { await fetch('/api/sweep/disable', { method: 'POST' }); loadSweepPlan(); };
