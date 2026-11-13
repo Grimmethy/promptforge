@@ -234,7 +234,9 @@ def _run_job(store, pf, job, available, st, owner, deliver, timings_path, now, o
                 pass
         if deliver is not None:
             try:
-                deliver(rec, seed, gen)
+                delivered = deliver(rec, seed, gen)
+                if isinstance(delivered, str) and delivered:
+                    row["delivered"] = delivered
             except Exception as exc:  # noqa: BLE001 - the picture exists in the gallery; delivery is reported, never fatal
                 row["delivery_error"] = str(exc)[:200]
         results.append(row)

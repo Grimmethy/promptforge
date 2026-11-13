@@ -6,6 +6,7 @@
     python3 -m scripts.jobs hold ID | release ID | remove ID
     python3 -m scripts.jobs run [--limit N] [--requester NAME] [--priority urgent|normal|bulk] [--dry-run]   (render the queue; see runner.py)
     python3 -m scripts.jobs estimate [--requester NAME]
+    python3 -m scripts.jobs results ID
 
 It works on the same atomic job files as the HTTP API (PROMPTFORGE_JOBS_DIR respected). Exit codes: 0 ok, 2 the store refused (one 'error:' line per problem),
 1 anything else (a missing file, JSON that does not parse).
@@ -18,7 +19,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "server"))
 from core import job_plan, jobs  # noqa: E402
 
-from . import runner  # noqa: E402
+from . import destinations, runner  # noqa: E402
 
 
 def _counts_line(records):
@@ -50,7 +51,7 @@ def build_parser():
     rn.add_argument("--dry-run", action="store_true", help="print the planned order and the estimate, change nothing")
     es = sub.add_parser("estimate", help="how long the queued jobs will take")
     es.add_argument("--requester")
-    for name in ("show", "hold", "release", "remove"):
+    for name in ("show", "results", "hold", "release", "remove"):
         p = sub.add_parser(name)
         p.add_argument("id")
     return ap
@@ -79,7 +80,8 @@ def main(argv=None, store=None, out=print, err=None, stdin=None, run_fn=None):
                 for r in shown:
                     out(_job_line(r))
         elif args.command == "run":
-            return (run_fn or runner.run)(store, runner.JobPF(), limit=args.limit, requester=args.requester, priority=args.priority, dry_run=args.dry_run, out=out)
+            return (run_fn or runner.run)(store, runner.JobPF(), limit=args.limit, requester=args.requester, priority=args.priority, dry_run=args.dry_run, out=out,
+                                            deliver=destinations.make_deliver())
         elif args.command == "estimate":
             queued = store.list(state="queued", requester=args.requester)
             if not queued:
@@ -87,6 +89,22 @@ def main(argv=None, store=None, out=print, err=None, stdin=None, run_fn=None):
             else:
                 est = job_plan.estimate(queued, job_plan.load_timings(os.path.join(store.root, "timings.jsonl")))
                 out("queued %d jobs, %d pictures, about %s%s" % (len(queued), est["pictures"], runner.format_seconds(est["total_seconds"]), " (rough)" if est["rough"] else ""))
+        elif args.command == "results":
+            rec = store.get(args.id)
+            if rec is None:
+                raise jobs.JobError("no job %s" % args.id)
+            by_seed = {r.get("seed"): r for r in rec.get("results") or []}
+            ok = 0
+            for seed in rec["seeds"]:
+                r = by_seed.get(seed)
+                if r is None:
+                    out("%d  pending" % seed)
+                elif r.get("status") == "ok":
+                    ok += 1
+                    out("%d  ok  %ss  %s  %s" % (seed, r.get("seconds"), r.get("gallery"), r.get("delivered") or "-"))
+                else:
+                    out("%d  error  %s" % (seed, r.get("error")))
+            out("%d of %d seeds ok" % (ok, len(rec["seeds"])))
         elif args.command == "show":
             rec = store.get(args.id)
             if rec is None:
