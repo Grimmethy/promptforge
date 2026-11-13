@@ -157,5 +157,25 @@ class RunAndEstimateTest(CliBase):
         self.assertEqual(self.out, ["queue is empty"])
 
 
+class ResultsCommandTest(CliBase):
+    def test_results_lists_every_seed_and_counts_the_ok_ones(self):
+        j = self.store.add(spec(seeds=[1, 2, 3, 4]))
+        self.store.set_state(j["id"], "running", {"results": [
+            {"seed": 2, "status": "error", "error": "no model"},
+            {"seed": 1, "status": "ok", "seconds": 7, "gallery": "2026-11/a_0.png", "delivered": "/art/a.png"},
+            {"seed": 3, "status": "ok", "seconds": 9, "gallery": "2026-11/b_0.png"}]})
+        self.assertEqual(self.run_cli("results", j["id"]), 0)
+        self.assertEqual(self.out, ["1  ok  7s  2026-11/a_0.png  /art/a.png", "2  error  no model", "3  ok  9s  2026-11/b_0.png  -", "4  pending", "2 of 4 seeds ok"])
+
+    def test_results_of_an_unknown_job_exits_2(self):
+        self.assertEqual(self.run_cli("results", "job-20260101000000-000000"), 2)
+        self.assertEqual(self.err, ["error: no job job-20260101000000-000000"])
+
+    def test_run_passes_a_deliver_function(self):
+        seen = {}
+        cli.main(["run"], store=self.store, out=self.out.append, err=self.err.append, run_fn=lambda store, pf, **kw: seen.update(kw) or 0)
+        self.assertTrue(callable(seen["deliver"]))
+
+
 if __name__ == "__main__":
     unittest.main()

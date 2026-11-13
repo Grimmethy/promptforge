@@ -192,6 +192,23 @@ class ResultsTest(Base):
         self.assertNotIn("delivery_error", rec["results"][0])
         self.assertEqual(rec["results"][1]["delivery_error"], "disk full")
 
+    def test_a_delivered_string_is_recorded_and_a_none_or_an_error_is_not(self):
+        j = self.add(seeds=[1, 2, 3])
+
+        def deliver(job, seed, gen):
+            if seed == 1:
+                return "/art/x_1.png"
+            if seed == 2:
+                return None
+            raise RuntimeError("disk full")
+        self.run_runner(FakePF(), deliver=deliver)
+        r1, r2, r3 = self.store.get(j["id"])["results"]
+        self.assertEqual(r1["delivered"], "/art/x_1.png")
+        self.assertNotIn("delivered", r2)
+        self.assertNotIn("delivery_error", r2)
+        self.assertNotIn("delivered", r3)
+        self.assertEqual(r3["delivery_error"], "disk full")
+
     def test_a_tiny_picture_counts_as_a_failed_attempt(self):
         j = self.add(seeds=[1])
         pf = FakePF(data=b"tiny")
