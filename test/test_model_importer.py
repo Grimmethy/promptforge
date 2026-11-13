@@ -327,6 +327,108 @@ class ExecuteTest(unittest.TestCase):
         self.assertEqual(seen[0][1], {})
 
 
+class SizeCapTest(unittest.TestCase):
+    """The size cap depends on the model type: 6 GiB for a lora or embedding, 12 GiB for a checkpoint (a full SDXL / Illustrious checkpoint is about 6.9 GB),
+    and an import needs the file's size plus 2 GiB free on the models disk."""
+    CHECKPOINT_BYTES = 6938504356          # the real size Civitai reported for Nova Flat XL (2026-11-13)
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.models = os.path.join(self.tmp.name, "models")
+
+    def api(self, model_type, size_bytes, name="big.safetensors"):
+        api = json.loads(json.dumps(SAMPLE_1564160))
+        api["type"] = model_type
+        api["modelVersions"][0]["files"][0].update(name=name, hashes={}, sizeKB=size_bytes / 1024)
+        return api
+
+    def plan(self, model_type, size_bytes, **kw):
+        return mi.fetch_plan("https://civitai.com/models/1", fetcher_for(self.api(model_type, size_bytes)), models_dir=self.models, **kw)
+
+    def test_the_caps_per_type(self):
+        self.assertEqual(mi.max_bytes_for("Checkpoint"), 12 * 1024 ** 3)
+        self.assertEqual(mi.max_bytes_for("checkpoint"), 12 * 1024 ** 3)
+        for other in ("LORA", "lora", "TextualInversion", "embedding", None, ""):
+            self.assertEqual(mi.max_bytes_for(other), 6 * 1024 ** 3)
+
+    def test_a_6_9_gb_checkpoint_plan_is_accepted_and_the_same_size_lora_is_refused(self):
+        p = self.plan("Checkpoint", self.CHECKPOINT_BYTES)
+        self.assertEqual((p["folder"], p["file"]["size_bytes"]), ("checkpoints", self.CHECKPOINT_BYTES))
+        with self.assertRaisesRegex(mi.ImportError_, "limit"):
+            self.plan("LORA", self.CHECKPOINT_BYTES)
+
+    def test_a_13_gb_checkpoint_is_refused(self):
+        with self.assertRaisesRegex(mi.ImportError_, "limit"):
+            self.plan("Checkpoint", 13 * 1024 ** 3)
+
+    def test_an_explicit_max_bytes_still_wins(self):
+        with self.assertRaisesRegex(mi.ImportError_, "limit"):
+            self.plan("Checkpoint", 5000, max_bytes=1024)
+
+    def test_a_type_override_picks_the_cap(self):
+        p = self.plan("LORA", self.CHECKPOINT_BYTES, type_override="checkpoint")
+        self.assertEqual(p["folder"], "checkpoints")
+
+    def test_hugging_face_uses_the_type_you_gave(self):
+        tree = [{"path": "m.safetensors", "size": self.CHECKPOINT_BYTES}]
+        link = "https://huggingface.co/o/r/blob/main/m.safetensors"
+        fetch = lambda u, h: json.dumps(tree).encode()  # noqa: E731
+        p = mi.fetch_plan(link, fetch, models_dir=self.models, type_override="checkpoint")
+        self.assertEqual(p["folder"], "checkpoints")
+        with self.assertRaisesRegex(mi.ImportError_, "limit"):
+            mi.fetch_plan(link, fetch, models_dir=self.models, type_override="lora")
+        with self.assertRaisesRegex(mi.ImportError_, "limit"):
+            mi.fetch_plan(link, lambda u, h: json.dumps([{"path": "m.safetensors", "size": 13 * 1024 ** 3}]).encode(), models_dir=self.models, type_override="checkpoint")
+
+    def run_import(self, model_type, seen, free_bytes=None, size_bytes=None):
+        """execute_plan on a small real file whose plan CLAIMS size_bytes; the downloader records the cap it is given."""
+        data = safetensors_bytes()
+        plan = self.plan(model_type, size_bytes or self.CHECKPOINT_BYTES)
+
+        def dl(url, dest, headers, max_bytes, progress):
+            seen.append(max_bytes)
+            with open(dest, "wb") as fh:
+                fh.write(data)
+            return len(data)
+        reg, lic = os.path.join(self.tmp.name, "r.json"), os.path.join(self.tmp.name, "l.json")
+        if free_bytes is None:
+            return mi.execute_plan(plan, self.models, dl, registry_path=reg, licenses_path=lic)
+        with mock.patch.object(mi.shutil, "disk_usage", return_value=mock.Mock(free=free_bytes)):
+            return mi.execute_plan(plan, self.models, dl, registry_path=reg, licenses_path=lic)
+
+    def test_the_downloader_is_given_the_checkpoint_cap(self):
+        seen = []
+        self.run_import("Checkpoint", seen, free_bytes=10 * 1024 ** 3 + self.CHECKPOINT_BYTES)
+        self.assertEqual(seen, [12 * 1024 ** 3])
+
+    def test_the_downloader_is_given_the_lora_cap_for_a_lora(self):
+        seen = []
+        self.run_import("LORA", seen, free_bytes=10 * 1024 ** 3, size_bytes=1000)
+        self.assertEqual(seen, [6 * 1024 ** 3])
+
+    def test_execute_plan_refuses_a_13_gb_checkpoint_plan_before_downloading(self):
+        plan = self.plan("Checkpoint", 5000)
+        plan["file"]["size_bytes"] = 13 * 1024 ** 3
+        seen = []
+        with self.assertRaisesRegex(mi.ImportError_, "limit"):
+            mi.execute_plan(plan, self.models, lambda *a: seen.append(a), registry_path=os.path.join(self.tmp.name, "r.json"), licenses_path=os.path.join(self.tmp.name, "l.json"))
+        self.assertEqual(seen, [])
+
+    def test_too_little_free_space_refuses_and_leaves_nothing(self):
+        seen = []
+        with self.assertRaisesRegex(mi.ImportError_, "free disk space"):
+            self.run_import("Checkpoint", seen, free_bytes=self.CHECKPOINT_BYTES + 2 * 1024 ** 3 - 1)
+        self.assertEqual(seen, [])
+        self.assertFalse(os.path.exists(os.path.join(self.models, ".quarantine")))
+        self.assertFalse(os.path.exists(os.path.join(self.models, "checkpoints")))
+
+    def test_exactly_enough_free_space_is_enough(self):
+        seen = []
+        res = self.run_import("Checkpoint", seen, free_bytes=self.CHECKPOINT_BYTES + 2 * 1024 ** 3)
+        self.assertTrue(os.path.isfile(res["destination"]))
+
+
 class KeyTest(unittest.TestCase):
     def test_the_key_is_read_from_the_config_file_and_never_leaks(self):
         with tempfile.TemporaryDirectory() as d:
