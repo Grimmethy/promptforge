@@ -4,6 +4,8 @@
     python3 -m scripts.jobs status [--requester NAME] [--state STATE] [--json]
     python3 -m scripts.jobs show ID
     python3 -m scripts.jobs hold ID | release ID | remove ID
+    python3 -m scripts.jobs run [--limit N] [--requester NAME] [--priority urgent|normal|bulk] [--dry-run]   (render the queue; see runner.py)
+    python3 -m scripts.jobs estimate [--requester NAME]
 
 It works on the same atomic job files as the HTTP API (PROMPTFORGE_JOBS_DIR respected). Exit codes: 0 ok, 2 the store refused (one 'error:' line per problem),
 1 anything else (a missing file, JSON that does not parse).
@@ -14,7 +16,9 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "server"))
-from core import jobs  # noqa: E402
+from core import job_plan, jobs  # noqa: E402
+
+from . import runner  # noqa: E402
 
 
 def _counts_line(records):
@@ -39,13 +43,20 @@ def build_parser():
     st.add_argument("--requester")
     st.add_argument("--state", choices=jobs.STATES)
     st.add_argument("--json", action="store_true")
+    rn = sub.add_parser("run", help="render the queued jobs")
+    rn.add_argument("--limit", type=int, default=0, help="stop after this many pictures")
+    rn.add_argument("--requester")
+    rn.add_argument("--priority", choices=jobs.PRIORITIES)
+    rn.add_argument("--dry-run", action="store_true", help="print the planned order and the estimate, change nothing")
+    es = sub.add_parser("estimate", help="how long the queued jobs will take")
+    es.add_argument("--requester")
     for name in ("show", "hold", "release", "remove"):
         p = sub.add_parser(name)
         p.add_argument("id")
     return ap
 
 
-def main(argv=None, store=None, out=print, err=None, stdin=None):
+def main(argv=None, store=None, out=print, err=None, stdin=None, run_fn=None):
     err = err or (lambda msg: print(msg, file=sys.stderr))
     try:
         args = build_parser().parse_args(argv)
@@ -67,6 +78,15 @@ def main(argv=None, store=None, out=print, err=None, stdin=None):
                 out(line)
                 for r in shown:
                     out(_job_line(r))
+        elif args.command == "run":
+            return (run_fn or runner.run)(store, runner.JobPF(), limit=args.limit, requester=args.requester, priority=args.priority, dry_run=args.dry_run, out=out)
+        elif args.command == "estimate":
+            queued = store.list(state="queued", requester=args.requester)
+            if not queued:
+                out("queue is empty")
+            else:
+                est = job_plan.estimate(queued, job_plan.load_timings(os.path.join(store.root, "timings.jsonl")))
+                out("queued %d jobs, %d pictures, about %s%s" % (len(queued), est["pictures"], runner.format_seconds(est["total_seconds"]), " (rough)" if est["rough"] else ""))
         elif args.command == "show":
             rec = store.get(args.id)
             if rec is None:
