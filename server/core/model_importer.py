@@ -15,6 +15,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import socket
 import struct
 import sys
@@ -24,7 +25,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-MAX_BYTES = 6 * 1024 ** 3
+MAX_BYTES = 6 * 1024 ** 3                    # loras, embeddings and anything that is not a checkpoint
+CHECKPOINT_MAX_BYTES = 12 * 1024 ** 3       # a full SDXL / Illustrious checkpoint is about 6.9 GB (2026-11-13: every one was refused at 6 GiB)
+FREE_SPACE_MARGIN = 2 * 1024 ** 3           # an import needs the file's size plus this much free on the models disk
 CONNECT_TIMEOUT = 3.0   # seconds a single address gets before the next one is tried
 FETCH_DEADLINE = 20.0   # seconds a metadata fetch may take in all
 ALLOWED_HOSTS = ("civitai.com", "www.civitai.com", "civitai.red", "www.civitai.red", "huggingface.co")
@@ -43,6 +46,12 @@ class ImportError_(ValueError):
 
 
 # ----------------------------------------------------------------------------------------------- link
+
+def max_bytes_for(model_type):
+    """The size cap for a model of this type (a Civitai type string or our own: 'Checkpoint', 'checkpoint', 'LORA', ...): CHECKPOINT_MAX_BYTES for a
+    checkpoint, MAX_BYTES for everything else."""
+    return CHECKPOINT_MAX_BYTES if str(model_type or "").strip().lower() == "checkpoint" else MAX_BYTES
+
 
 def parse_link(url):
     """{site: 'civitai', model_id, version_id|None} for a civitai.com / civitai.red /models/<id> link (optional ?modelVersionId=<n>), or
@@ -226,11 +235,11 @@ def _check_file(name, size, max_bytes):
         raise ImportError_("the file is %d bytes, over the %d byte limit" % (size, max_bytes))
 
 
-def fetch_plan(link, fetcher=None, key=None, models_dir=None, max_bytes=MAX_BYTES, type_override=None):
+def fetch_plan(link, fetcher=None, key=None, models_dir=None, max_bytes=None, type_override=None):
     """The plan for `link` (a URL string or parse_link's dict) WITHOUT downloading the model: {site, model_id, version_id, name, type, base_model,
     base, trained_words, file: {name, size_bytes, sha256, url}, folder, destination, nsfw, allow_commercial_use, licence: {commercial_use, text,
     source_url}, warnings}. `fetcher(url, headers)` returns bytes (default: urllib). ImportError_ for a type we cannot place, a non-safetensors
-    file, a file over max_bytes or an unreadable answer."""
+    file, a file over max_bytes (default: max_bytes_for the model's type) or an unreadable answer."""
     spec = parse_link(link) if isinstance(link, str) else link
     fetch = fetcher or default_fetcher
     try:
@@ -269,10 +278,10 @@ def _plan_civitai(spec, fetch, key, max_bytes, type_override):
         raise ImportError_("only .safetensors files are accepted and this version has none")
     f = next((x for x in files if x.get("primary")), files[0])
     size = int(round(float(f.get("sizeKB") or 0) * 1024))
-    _check_file(f["name"], size, max_bytes)
+    mtype = type_override or model.get("type")
+    _check_file(f["name"], size, max_bytes if max_bytes is not None else max_bytes_for(mtype))
     flags = _flags(model.get("allowCommercialUse"))
     verdict, text = licence_verdict(flags)
-    mtype = type_override or model.get("type")
     return {"site": "civitai", "model_id": model.get("id", spec["model_id"]), "version_id": ver.get("id"),
             "name": "%s - %s" % (model.get("name"), ver.get("name")) if ver.get("name") else model.get("name"),
             "type": mtype, "base_model": ver.get("baseModel"), "base": map_base(ver.get("baseModel")),
@@ -287,7 +296,8 @@ def _plan_civitai(spec, fetch, key, max_bytes, type_override):
 def _plan_hf(spec, fetch, max_bytes, type_override):
     if not type_override:
         raise ImportError_("a Hugging Face file has no type information: say whether it is a lora, a checkpoint or an embedding")
-    _check_file(spec["path"], 0, max_bytes)
+    cap = max_bytes if max_bytes is not None else max_bytes_for(type_override)
+    _check_file(spec["path"], 0, cap)
     tree = json.loads(fetch("https://huggingface.co/api/models/%s/tree/%s?recursive=true" % (spec["repo"], urllib.parse.quote(spec["rev"], safe="")), {}))
     if not isinstance(tree, list):
         raise ImportError_("unexpected answer from Hugging Face")
@@ -295,7 +305,7 @@ def _plan_hf(spec, fetch, max_bytes, type_override):
     if entry is None:
         raise ImportError_("that file is not in the repository")
     size = int(entry.get("size") or 0)
-    _check_file(spec["path"], size, max_bytes)
+    _check_file(spec["path"], size, cap)
     name = os.path.basename(spec["path"])
     return {"site": "huggingface", "model_id": spec["repo"], "version_id": spec["rev"], "name": os.path.splitext(name)[0], "type": type_override,
             "base_model": None, "base": None, "trained_words": [],
@@ -406,7 +416,18 @@ def record_licence(plan, licenses_path=None):
     _write_json(path, lic)
 
 
-def execute_plan(plan, models_dir=None, downloader=None, registry_path=None, licenses_path=None, key=None, progress=None, max_bytes=MAX_BYTES):
+def _check_free_space(models_dir, size):
+    """ImportError_ when the disk holding models_dir (or its nearest existing parent) has less than `size` + FREE_SPACE_MARGIN bytes free."""
+    probe = os.path.abspath(models_dir)
+    while probe and not os.path.exists(probe) and os.path.dirname(probe) != probe:
+        probe = os.path.dirname(probe)
+    free = shutil.disk_usage(probe).free
+    need = int(size) + FREE_SPACE_MARGIN
+    if free < need:
+        raise ImportError_("not enough free disk space: %.1f GB needed (the file plus %.0f GB spare), %.1f GB free" % (need / 1e9, FREE_SPACE_MARGIN / 1024 ** 3, free / 1e9))
+
+
+def execute_plan(plan, models_dir=None, downloader=None, registry_path=None, licenses_path=None, key=None, progress=None, max_bytes=None):
     """Download `plan`'s file into models/.quarantine, verify it (size cap, SHA256 when the plan has one, safetensors header), move it into the
     destination folder WITHOUT overwriting anything, then write the registry entry and the licence row. The quarantine folder is always removed.
     Returns {file, destination, registry_id, licence}. ImportError_ on any failure, with nothing left behind in quarantine or destination."""
@@ -414,11 +435,14 @@ def execute_plan(plan, models_dir=None, downloader=None, registry_path=None, lic
     folder = TYPE_DIRS.get(str(plan["type"]).lower())
     if not folder:
         raise ImportError_("cannot place a %s model yet" % plan["type"])
+    if max_bytes is None:
+        max_bytes = max_bytes_for(plan["type"])
     _check_file(plan["file"]["name"], plan["file"].get("size_bytes") or 0, max_bytes)
     name = os.path.basename(plan["file"]["name"])
     dest = os.path.join(base, folder, name)
     if os.path.exists(dest):
         raise ImportError_("%s is already installed; it was not overwritten" % name)
+    _check_free_space(base, plan["file"].get("size_bytes") or 0)
     quarantine = os.path.join(base, QUARANTINE_DIR, secrets.token_hex(8))
     os.makedirs(quarantine)
     tmp = os.path.join(quarantine, name)
