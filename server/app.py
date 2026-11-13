@@ -25,6 +25,7 @@ from core import (assemble, cf_characters, clean, gallery_refs, gallery_sweep, h
 from core import loras as loras_mod
 from core import model_importer
 from core import civitai_session
+from core import jobs_routes
 
 logger = logging.getLogger(__name__)
 
@@ -1461,6 +1462,9 @@ def handoff_image(hid):
     except (handoff.HandoffError, handoff.NotFound) as e:
         return _handoff_error(e)
     return send_from_directory(os.path.dirname(p), os.path.basename(p))
+
+
+jobs_routes.register(app)      # /api/jobs: the render job queue (server/core/jobs_routes.py)
 
 
 if __name__ == "__main__":
