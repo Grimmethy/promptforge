@@ -177,5 +177,58 @@ class ResultsCommandTest(CliBase):
         self.assertTrue(callable(seen["deliver"]))
 
 
+class WindowCommandTest(CliBase):
+    def setUp(self):
+        super().setUp()
+        import datetime
+        self.store = jobs.JobStore(os.path.join(self.tmp.name, "jobs"), lookup=lambda n: {"commercial_use": "yes"},
+                                   clock=lambda: datetime.datetime.now(datetime.timezone.utc))
+
+    @staticmethod
+    def later(hours):
+        import datetime
+        return (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def test_show_with_nothing_armed(self):
+        self.assertEqual(self.run_cli("window", "show"), 0)
+        self.assertEqual(self.out, ["no window armed"])
+
+    def test_arm_then_show_then_disarm(self):
+        start, end = self.later(1), self.later(5)
+        self.assertEqual(self.run_cli("window", "arm", start, end), 0)
+        self.assertRegex(self.out[-1], r"^window %s to %s \(armed \d{4}-" % (start, end))
+        self.assertEqual(self.store.window()["end"], end)
+        self.out.clear()
+        self.assertEqual(self.run_cli("window", "show"), 0)
+        self.assertIn(start, self.out[0])
+        self.out.clear()
+        self.assertEqual(self.run_cli("window", "disarm"), 0)
+        self.assertEqual(self.out, ["window removed"])
+        self.assertIsNone(self.store.window())
+        self.out.clear()
+        self.assertEqual(self.run_cli("window", "disarm"), 0)
+        self.assertEqual(self.out, ["no window armed"])
+
+    def test_a_bad_window_exits_2_with_the_reasons_and_records_nothing(self):
+        self.assertEqual(self.run_cli("window", "arm", self.later(5), self.later(1)), 2)
+        self.assertEqual(self.err, ["error: end must be after start"])
+        self.assertIsNone(self.store.window())
+
+    def test_arm_needs_both_times(self):
+        self.assertEqual(self.run_cli("window", "arm", self.later(1)), 1)
+        self.assertIsNone(self.store.window())
+
+    def test_run_passes_the_stop_time_to_the_runner(self):
+        seen = {}
+        def fake_run(store, pf, **kw):
+            seen.update(kw)
+            return 0
+        code = cli.main(["run", "--until", "2026-11-14T05:00:00Z"], store=self.store, out=self.out.append, err=self.err.append, run_fn=fake_run)
+        self.assertEqual((code, seen["until"]), (0, "2026-11-14T05:00:00Z"))
+        seen.clear()
+        cli.main(["run"], store=self.store, out=self.out.append, err=self.err.append, run_fn=fake_run)
+        self.assertIsNone(seen["until"])
+
+
 if __name__ == "__main__":
     unittest.main()

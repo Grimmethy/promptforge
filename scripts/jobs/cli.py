@@ -7,6 +7,7 @@
     python3 -m scripts.jobs run [--limit N] [--requester NAME] [--priority urgent|normal|bulk] [--dry-run]   (render the queue; see runner.py)
     python3 -m scripts.jobs estimate [--requester NAME]
     python3 -m scripts.jobs results ID
+    python3 -m scripts.jobs window show | arm START END | disarm      (UTC times like 2026-11-14T05:00:00Z; arming only records the window)
 
 It works on the same atomic job files as the HTTP API (PROMPTFORGE_JOBS_DIR respected). Exit codes: 0 ok, 2 the store refused (one 'error:' line per problem),
 1 anything else (a missing file, JSON that does not parse).
@@ -49,6 +50,14 @@ def build_parser():
     rn.add_argument("--requester")
     rn.add_argument("--priority", choices=jobs.PRIORITIES)
     rn.add_argument("--dry-run", action="store_true", help="print the planned order and the estimate, change nothing")
+    rn.add_argument("--until", help="stop cleanly at this UTC time, e.g. 2026-11-14T05:00:00Z")
+    wn = sub.add_parser("window", help="record, show or remove an armed render window")
+    wsub = wn.add_subparsers(dest="window_command", required=True)
+    wsub.add_parser("show")
+    wa = wsub.add_parser("arm")
+    wa.add_argument("start")
+    wa.add_argument("end")
+    wsub.add_parser("disarm")
     es = sub.add_parser("estimate", help="how long the queued jobs will take")
     es.add_argument("--requester")
     for name in ("show", "results", "hold", "release", "remove"):
@@ -81,7 +90,7 @@ def main(argv=None, store=None, out=print, err=None, stdin=None, run_fn=None):
                     out(_job_line(r))
         elif args.command == "run":
             return (run_fn or runner.run)(store, runner.JobPF(), limit=args.limit, requester=args.requester, priority=args.priority, dry_run=args.dry_run, out=out,
-                                            deliver=destinations.make_deliver())
+                                            deliver=destinations.make_deliver(), until=args.until)
         elif args.command == "estimate":
             queued = store.list(state="queued", requester=args.requester)
             if not queued:
@@ -89,6 +98,12 @@ def main(argv=None, store=None, out=print, err=None, stdin=None, run_fn=None):
             else:
                 est = job_plan.estimate(queued, job_plan.load_timings(os.path.join(store.root, "timings.jsonl")))
                 out("queued %d jobs, %d pictures, about %s%s" % (len(queued), est["pictures"], runner.format_seconds(est["total_seconds"]), " (rough)" if est["rough"] else ""))
+        elif args.command == "window":
+            if args.window_command == "disarm":
+                out("window removed" if store.clear_window() else "no window armed")
+            else:
+                w = store.set_window(args.start, args.end) if args.window_command == "arm" else store.window()
+                out("window %s to %s (armed %s)" % (w["start"], w["end"], w["armed_at"]) if w else "no window armed")
         elif args.command == "results":
             rec = store.get(args.id)
             if rec is None:

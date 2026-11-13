@@ -238,5 +238,129 @@ class StoreTest(unittest.TestCase):
         self.assertIsNone(s.get(ids["done"]))
 
 
+class UpdateTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.table = {"NovaFlatILV9.safetensors": "yes"}
+        self.store = jobs.JobStore(os.path.join(self.tmp.name, "jobs"), lookup=lookup_for(self.table), clock=lambda: NOW)
+
+    def test_only_the_patched_keys_change_and_results_and_id_stay(self):
+        j = self.store.add(spec())
+        self.store.set_state(j["id"], "queued", {"results": [{"seed": 1, "status": "ok"}]})
+        rec = self.store.update(j["id"], {"priority": "urgent", "notes": "hi", "seeds": [5, 6]})
+        self.assertEqual((rec["priority"], rec["notes"], rec["seeds"]), ("urgent", "hi", [5, 6]))
+        for key in ("id", "created_at", "model", "positive", "width", "requester", "state", "attempts"):
+            self.assertEqual(rec[key], j[key], key)
+        self.assertEqual(rec["results"], [{"seed": 1, "status": "ok"}])
+        self.assertEqual(self.store.get(j["id"]), rec)
+
+    def test_a_held_job_can_be_edited_and_stays_held(self):
+        j = self.store.add(spec())
+        self.store.hold(j["id"])
+        rec = self.store.update(j["id"], {"positive": "a new prompt", "negative": "blurry", "needed_by": "2026-12-01", "purpose": "new purpose"})
+        self.assertEqual((rec["state"], rec["positive"], rec["negative"], rec["needed_by"], rec["purpose"]), ("held", "a new prompt", "blurry", "2026-12-01", "new purpose"))
+
+    def test_keys_outside_the_editable_list_are_refused_together(self):
+        j = self.store.add(spec())
+        with self.assertRaisesRegex(jobs.JobError, "cannot edit: model"):
+            self.store.update(j["id"], {"model": "x.safetensors"})
+        with self.assertRaisesRegex(jobs.JobError, "cannot edit: width, requester"):
+            self.store.update(j["id"], {"width": 64, "requester": "x"})
+        self.assertEqual(self.store.get(j["id"])["model"], j["model"])
+
+    def test_bad_values_report_every_problem_and_change_nothing(self):
+        j = self.store.add(spec())
+        with self.assertRaises(jobs.JobError) as cm:
+            self.store.update(j["id"], {"priority": "soon", "seeds": []})
+        self.assertGreaterEqual(len(cm.exception.errors), 2)
+        self.assertEqual(self.store.get(j["id"]), j)
+        with self.assertRaisesRegex(jobs.JobError, "changes must be an object"):
+            self.store.update(j["id"], ["priority"])
+
+    def test_a_running_or_finished_job_gives_a_state_error_with_the_exact_message(self):
+        j = self.store.add(spec())
+        for state in ("running", "done"):
+            self.store.set_state(j["id"], state)
+            with self.assertRaises(jobs.JobStateError) as cm:
+                self.store.update(j["id"], {"notes": "x"})
+            self.assertEqual(str(cm.exception), "job %s is %s; it can be edited only while queued or held" % (j["id"], state))
+
+    def test_a_missing_job_is_a_plain_job_error(self):
+        with self.assertRaises(jobs.JobError) as cm:
+            self.store.update("job-20260101000000-000000", {"notes": "x"})
+        self.assertNotIsInstance(cm.exception, jobs.JobStateError)
+        self.assertIn("no job", str(cm.exception))
+
+    def test_the_licence_rule_is_checked_again(self):
+        j = self.store.add(spec(commercial=True))
+        self.table["NovaFlatILV9.safetensors"] = "no"
+        with self.assertRaisesRegex(jobs.JobError, "commercial use is not cleared"):
+            self.store.update(j["id"], {"notes": "x"})
+
+    def test_wrong_state_transitions_raise_a_state_error_and_a_missing_job_does_not(self):
+        j = self.store.add(spec())
+        with self.assertRaises(jobs.JobStateError):
+            self.store.release(j["id"])
+        self.store.set_state(j["id"], "running")
+        with self.assertRaises(jobs.JobStateError):
+            self.store.hold(j["id"])
+        with self.assertRaises(jobs.JobStateError):
+            self.store.remove(j["id"])
+        with self.assertRaises(jobs.JobError) as cm:
+            self.store.hold("job-20260101000000-000000")
+        self.assertNotIsInstance(cm.exception, jobs.JobStateError)
+
+
+class WindowTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = os.path.join(self.tmp.name, "jobs")
+        self.store = jobs.JobStore(self.root, clock=lambda: NOW)
+
+    def test_a_valid_window_is_recorded_and_read_back(self):
+        self.assertIsNone(self.store.window())
+        rec = self.store.set_window("2026-11-14T01:00:00Z", "2026-11-14T05:00:00Z")
+        self.assertEqual(rec, {"start": "2026-11-14T01:00:00Z", "end": "2026-11-14T05:00:00Z", "armed_at": "2026-11-13T12:00:00Z"})
+        self.assertEqual(self.store.window(), rec)
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "window.json")))
+        self.assertEqual(os.listdir(self.root), ["window.json"])                          # no temp file left
+
+    def test_a_window_that_has_already_started_is_fine_while_its_end_is_ahead(self):
+        self.store.set_window("2026-11-13T11:00:00Z", "2026-11-13T15:00:00Z")
+
+    def test_each_problem_is_reported(self):
+        cases = (("tomorrow", "2026-11-14T05:00:00Z", "start must be a UTC time"), ("2026-11-14T01:00:00Z", None, "end must be a UTC time"),
+                 ("2026-11-14T05:00:00Z", "2026-11-14T01:00:00Z", "end must be after start"),
+                 ("2026-11-14T01:00:00Z", "2026-11-14T14:00:00Z", "at most 12 hours"),
+                 ("2026-11-13T09:00:00Z", "2026-11-13T11:00:00Z", "end must be in the future"))
+        for start, end, text in cases:
+            with self.assertRaisesRegex(jobs.JobError, text):
+                self.store.set_window(start, end)
+        for start, end in (("2026-11-14T01:00:00Z", "2026-11-14T01:00:00Z"), ("2026-11-13T11:00:00Z", "2026-11-13T12:00:00Z")):     # zero length; ending exactly now
+            with self.assertRaises(jobs.JobError, msg=end):
+                self.store.set_window(start, end)
+        with self.assertRaises(jobs.JobError) as cm:
+            self.store.set_window("x", "y")
+        self.assertEqual(len(cm.exception.errors), 2)
+        self.assertIsNone(self.store.window())
+        self.assertEqual(self.store.set_window("2026-11-14T01:00:00Z", "2026-11-14T13:00:00Z")["end"], "2026-11-14T13:00:00Z")     # exactly 12 hours is allowed
+
+    def test_clear_window(self):
+        self.store.set_window("2026-11-14T01:00:00Z", "2026-11-14T05:00:00Z")
+        self.assertTrue(self.store.clear_window())
+        self.assertFalse(self.store.clear_window())
+        self.assertIsNone(self.store.window())
+
+    def test_a_corrupt_or_incomplete_window_file_reads_as_none(self):
+        os.makedirs(self.root)
+        path = os.path.join(self.root, "window.json")
+        for text in ("{broken", "{}", '{"start": "a", "end": "b"}', "[1, 2]"):
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            self.assertIsNone(self.store.window(), text)
+
+
 if __name__ == "__main__":
     unittest.main()
