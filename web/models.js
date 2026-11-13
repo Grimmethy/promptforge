@@ -1,7 +1,13 @@
 /* PromptForge Studio: the LoRA picker and the model importer panel. Pure functions, loaded before app.js; node can load it so the choices, the
    spec and the badge decision are unit tested. The data comes from GET /api/loras and POST /api/models/plan (server/core/loras.py, model_importer.py). */
 (function (root) {
-  const MB = 1048576;
+  const GB = 1e9;
+  const MB = 1e6;
+  // one shared size formatter: decimal GB from 1 GB up, whole decimal MB below; 'unknown' for a missing or zero size
+  const formatSize = n => {
+    if (!n || !Number.isFinite(Number(n))) return 'unknown';
+    return Number(n) >= GB ? (Number(n) / GB).toFixed(1) + ' GB' : Math.round(Number(n) / MB) + ' MB';
+  };
   // does this registry entry fit the selected model's base? (an unknown base on either side never hides a LoRA)
   const fits = (lora, base) => !base || !lora.base || lora.base === base;
   // the base the registry lists for a checkpoint file, else null
@@ -24,7 +30,7 @@
     if (!plan) return [];
     const f = plan.file || {}, lic = plan.licence || {};
     const rows = [['Name', plan.name], ['Type', plan.type], ['Base model', plan.base_model || 'unknown'],
-      ['Size', f.size_bytes ? (f.size_bytes / MB).toFixed(1) + ' MB' : 'unknown'], ['File', f.name],
+      ['Size', formatSize(f.size_bytes)], ['File', f.name],
       ['Trigger words', (plan.trained_words || []).join(', ') || 'none'],
       ['Licence', (lic.commercial_use || 'unverified') + (lic.text ? ' (' + lic.text + ')' : '')],
       ['Installs to', plan.destination]].map(([label, text]) => ({ label, text: String(text == null ? '' : text), warn: false }));
@@ -38,7 +44,7 @@
     if (!job) return '';
     if (job.status === 'error') return 'Failed: ' + (job.error || 'unknown error');
     if (job.status === 'done') return 'Installed ' + ((job.result || {}).file || '') + (job.result && job.result.registry_id ? ' (registry id ' + job.result.registry_id + ')' : '');
-    const pct = job.total ? Math.min(100, Math.round(100 * (job.bytes || 0) / job.total)) + '% of ' + (job.total / MB).toFixed(0) + ' MB' : ((job.bytes || 0) / MB).toFixed(0) + ' MB';
+    const pct = job.total ? Math.min(100, Math.round(100 * (job.bytes || 0) / job.total)) + '% of ' + formatSize(job.total) : (job.bytes ? formatSize(job.bytes) : '0 MB');
     if (job.status === 'downloading' && job.via === 'session') return 'Downloading through your signed-in Civitai session...';
     return { planning: 'Checking the link...', downloading: 'Downloading ' + pct, verifying: 'Verifying the file...' }[job.status] || job.status;
   };
@@ -48,7 +54,7 @@
     if (s.signed_in === false) return { text: 'Civitai sign-in: not signed in', canSignIn: true };
     return { text: 'Civitai sign-in: unknown' + (s.error ? ' (' + s.error + ')' : ''), canSignIn: true };
   };
-  const api = { sessionLine, fits, baseOf, available, newRow, toSpec, notForSale, sellWarning, planRows, canImport, progressText, weightOf };
+  const api = { sessionLine, fits, baseOf, available, newRow, toSpec, notForSale, sellWarning, planRows, canImport, progressText, weightOf, formatSize };
   root.PFModels = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
