@@ -148,5 +148,76 @@ class RealAppTest(unittest.TestCase):
             self.assertEqual(os.listdir(tmp), [])            # reading wrote nothing
 
 
+def future(hours):
+    import datetime
+    return (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+class EstimateEditWindowTest(RoutesBase):
+    def test_estimate_numbers_filter_and_order(self):
+        a = self.file_job(requester="a", seeds=[1, 2], priority="urgent")
+        b = self.file_job(requester="b", seeds=[3])
+        job_plan = __import__("core.job_plan", fromlist=["x"])
+        job_plan.append_timing(os.path.join(self.root, "timings.jsonl"), {"model": "NovaFlatILV9.safetensors", "width": 512, "height": 512, "steps": 28, "seconds": 10})
+        body = self.client.get("/api/jobs/estimate").get_json()
+        self.assertEqual((body["queued"], body["pictures"], body["rough"]), (2, 3, False))
+        self.assertEqual(body["per_job"], {a["id"]: 20, b["id"]: 10})
+        self.assertEqual(body["total_seconds"], 20 + 10 + 30)
+        self.assertEqual(body["order"], [a["id"], b["id"]])
+        only = self.client.get("/api/jobs/estimate?requester=b").get_json()
+        self.assertEqual((only["queued"], only["order"], only["total_seconds"]), (1, [b["id"]], 40))
+
+    def test_estimate_of_an_empty_queue(self):
+        self.assertEqual(self.client.get("/api/jobs/estimate").get_json(),
+                         {"queued": 0, "pictures": 0, "total_seconds": 0, "rough": False, "per_job": {}, "order": []})
+
+    def test_edit_answers(self):
+        j = self.file_job()
+        r = self.post("/api/jobs/%s/edit" % j["id"], {"priority": "bulk", "notes": "later"})
+        self.assertEqual((r.status_code, r.get_json()["job"]["priority"], r.get_json()["job"]["notes"]), (200, "bulk", "later"))
+        self.assertEqual(self.store.get(j["id"])["priority"], "bulk")
+        self.assertEqual(self.post("/api/jobs/job-20260101000000-000000/edit", {"notes": "x"}).status_code, 404)
+        self.store.set_state(j["id"], "running")
+        r = self.post("/api/jobs/%s/edit" % j["id"], {"notes": "x"})
+        self.assertEqual(r.status_code, 409)
+        self.assertIn("edited only while queued or held", r.get_json()["error"])
+
+    def test_edit_refusals(self):
+        j = self.file_job()
+        r = self.post("/api/jobs/%s/edit" % j["id"], {"model": "x"})
+        self.assertEqual((r.status_code, r.get_json()["errors"]), (400, ["cannot edit: model"]))
+        self.assertEqual(self.post("/api/jobs/%s/edit" % j["id"], ["notes"]).status_code, 400)
+        r = self.post("/api/jobs/%s/edit" % j["id"], {"notes": "x"}, env=REMOTE)
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(self.store.get(j["id"])["notes"], "")
+
+    def test_window_get_post_delete(self):
+        r = self.client.get("/api/jobs/window").get_json()
+        self.assertIsNone(r["window"])
+        self.assertTrue(r["now"].endswith("Z"))
+        start, end = future(1), future(5)
+        r = self.post("/api/jobs/window", {"start": start, "end": end})
+        self.assertEqual((r.status_code, r.get_json()["window"]["start"], r.get_json()["window"]["end"]), (200, start, end))
+        self.assertEqual(self.client.get("/api/jobs/window").get_json()["window"]["end"], end)
+        r = self.client.delete("/api/jobs/window", environ_overrides=LOCAL)
+        self.assertEqual((r.status_code, r.get_json()["window"]), (200, None))
+        self.assertIsNone(self.client.get("/api/jobs/window").get_json()["window"])
+
+    def test_window_refusals(self):
+        r = self.post("/api/jobs/window", {"start": future(5), "end": future(1)})
+        self.assertEqual((r.status_code, r.get_json()["errors"]), (400, ["end must be after start"]))
+        self.assertEqual(self.post("/api/jobs/window", ["x"]).status_code, 400)
+        self.assertEqual(self.post("/api/jobs/window", {"start": future(1), "end": future(2)}, env=REMOTE).status_code, 403)
+        self.assertEqual(self.client.delete("/api/jobs/window", environ_overrides=REMOTE).status_code, 403)
+        self.assertIsNone(self.store.window())
+        self.post("/api/jobs/window", {"start": future(1), "end": future(2)})
+        self.client.delete("/api/jobs/window", environ_overrides=REMOTE)
+        self.assertIsNotNone(self.store.window())                                      # a remote delete changed nothing
+
+    def test_window_and_estimate_reads_are_open_to_a_remote_address(self):
+        for path in ("/api/jobs/window", "/api/jobs/estimate"):
+            self.assertEqual(self.client.get(path, environ_overrides=REMOTE).status_code, 200, path)
+
+
 if __name__ == "__main__":
     unittest.main()

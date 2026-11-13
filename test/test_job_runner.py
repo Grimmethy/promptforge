@@ -419,5 +419,85 @@ class FormatTest(unittest.TestCase):
             self.assertEqual(runner.format_seconds(n), text, n)
 
 
+class UntilTest(Base):
+    BASE_T = 1_800_000_000.0
+
+    def until(self, offset):
+        return runner._iso(self.BASE_T + offset)
+
+    def fixed_now(self, pf, after_pictures=None, early=0.0, late=1000.0):
+        """A clock that sits at BASE_T + early until `after_pictures` pictures were generated, then at BASE_T + late."""
+        return lambda: self.BASE_T + (late if after_pictures is not None and len(pf.specs) >= after_pictures else early)
+
+    def test_a_window_that_has_already_ended_renders_nothing_and_leaves_the_jobs_queued(self):
+        a = self.add()
+        pf = FakePF()
+        self.assertEqual(self.run_runner(pf, until=self.until(-10), now=self.fixed_now(pf)), 0)
+        self.assertEqual(self.state(a["id"]), "queued")
+        self.assertNotIn("generate", pf.calls)
+        self.assertEqual(self.out.count("window ended: stopping"), 1)
+        self.assertEqual(pf.calls, ["acquire", "release"])
+
+    def test_the_stop_time_itself_counts_as_ended(self):
+        a = self.add()
+        pf = FakePF()
+        self.run_runner(pf, until=self.until(0), now=self.fixed_now(pf))
+        self.assertEqual((self.state(a["id"]), pf.calls.count("generate")), ("queued", 0))
+        self.assertEqual(self.store.get(a["id"])["attempts"], 0)                       # the job was never started
+
+    def test_the_stop_time_reached_exactly_between_pictures_stops_the_job(self):
+        a = self.add(seeds=[1, 2, 3])
+        pf = FakePF()
+        self.run_runner(pf, until=self.until(500), now=self.fixed_now(pf, after_pictures=1, late=500))
+        self.assertEqual((self.state(a["id"]), pf.calls.count("generate")), ("queued", 1))
+
+    def test_the_window_ending_between_pictures_stops_the_job_with_its_pictures_kept(self):
+        a = self.add(requester="a", seeds=[1, 2, 3])
+        b = self.add(requester="b", seeds=[1])
+        pf = FakePF()
+        self.assertEqual(self.run_runner(pf, until=self.until(500), now=self.fixed_now(pf, after_pictures=1)), 0)
+        rec = self.store.get(a["id"])
+        self.assertEqual(rec["state"], "queued")
+        self.assertEqual([(r["seed"], r["status"]) for r in rec["results"]], [(1, "ok")])
+        self.assertEqual(self.state(b["id"]), "queued")
+        self.assertEqual(pf.calls.count("generate"), 1)
+        self.assertEqual(self.out.count("window ended: stopping"), 1)
+        self.assertEqual(pf.calls[-1], "release")
+        self.assertFalse(os.path.exists(self.pidfile))
+
+    def test_a_later_run_without_a_stop_time_renders_only_the_seeds_that_are_left(self):
+        a = self.add(seeds=[1, 2, 3])
+        pf = FakePF()
+        self.run_runner(pf, until=self.until(500), now=self.fixed_now(pf, after_pictures=1))
+        pf2 = FakePF()
+        self.assertEqual(self.run_runner(pf2), 0)
+        self.assertEqual([s["seed"] for s in pf2.specs], [2, 3])
+        self.assertEqual(self.state(a["id"]), "done")
+
+    def test_a_stop_time_far_ahead_changes_nothing(self):
+        a = self.add(seeds=[1, 2])
+        pf = FakePF()
+        self.assertEqual(self.run_runner(pf, until=self.until(10**6), now=self.fixed_now(pf)), 0)
+        self.assertEqual((self.state(a["id"]), pf.calls.count("generate")), ("done", 2))
+        self.assertNotIn("window ended: stopping", self.out)
+
+    def test_a_bad_stop_time_returns_1_before_anything_is_touched(self):
+        a = self.add()
+        for bad in ("tomorrow", "2026-11-14 05:00", 12345):
+            pf = FakePF()
+            self.out.clear()
+            self.assertEqual(self.run_runner(pf, until=bad), 1, bad)
+            self.assertEqual(self.out, ["error: until must be a UTC time like 2026-11-14T05:00:00Z"])
+            self.assertEqual(pf.calls, [])
+        self.assertEqual(self.state(a["id"]), "queued")
+        self.assertFalse(os.path.exists(self.pidfile))
+
+    def test_a_dry_run_ignores_the_stop_time(self):
+        self.add()
+        pf = FakePF()
+        self.assertEqual(self.run_runner(pf, dry_run=True, until=self.until(-10), now=self.fixed_now(pf)), 0)
+        self.assertEqual(pf.calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()

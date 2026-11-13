@@ -1,9 +1,12 @@
 """HTTP routes of the render job queue (/api/jobs). Registered on the Flask app by server/app.py; the store is built per request so the jobs folder
 (PROMPTFORGE_JOBS_DIR) is read at call time. Reads are open to anyone who can reach the service; every write must come from this machine.
 """
+import datetime
+import os
+
 from flask import jsonify, request
 
-from core import jobs
+from core import job_plan, jobs
 
 _PROXY_HEADERS = ("X-Forwarded-For", "Forwarded", "X-Real-IP")
 _LOCAL = ("127.0.0.1", "::1")
@@ -76,9 +79,60 @@ def register(app, store_factory=None):
             return jsonify({"error": "no job %s" % jid}), 404
         try:
             rec = getattr(store, action)(jid)
-        except jobs.JobError as exc:
+        except jobs.JobStateError as exc:
             return jsonify({"error": str(exc), "errors": exc.errors}), 409
+        except jobs.JobError as exc:
+            return jsonify({"error": str(exc), "errors": exc.errors}), 404
         return jsonify({"job": rec})
+
+    @app.route("/api/jobs/estimate", methods=["GET"])
+    def jobs_estimate():
+        store = make()
+        queued = store.list(state="queued", requester=request.args.get("requester") or None)
+        est = job_plan.estimate(queued, job_plan.load_timings(os.path.join(store.root, "timings.jsonl")))
+        return jsonify({"queued": len(queued), "pictures": est["pictures"], "total_seconds": est["total_seconds"], "rough": est["rough"],
+                        "per_job": est["per_job"], "order": [j["id"] for j in job_plan.order_jobs(queued)]})
+
+    @app.route("/api/jobs/<jid>/edit", methods=["POST"])
+    def jobs_edit(jid):
+        if not loopback_only(request):
+            return refuse_remote()
+        patch = request.get_json(force=True, silent=True)
+        if not isinstance(patch, dict):
+            return jsonify({"error": "the body must be a JSON object", "errors": ["the body must be a JSON object"]}), 400
+        store = make()
+        if store.get(jid) is None:
+            return jsonify({"error": "no job %s" % jid}), 404
+        try:
+            rec = store.update(jid, patch)
+        except jobs.JobStateError as exc:
+            return jsonify({"error": str(exc), "errors": exc.errors}), 409
+        except jobs.JobError as exc:
+            return jsonify({"error": str(exc), "errors": exc.errors}), 400
+        return jsonify({"job": rec})
+
+    @app.route("/api/jobs/window", methods=["GET"])
+    def jobs_window_get():
+        return jsonify({"window": make().window(), "now": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
+
+    @app.route("/api/jobs/window", methods=["POST"])
+    def jobs_window_set():
+        if not loopback_only(request):
+            return refuse_remote()
+        body = request.get_json(force=True, silent=True)
+        if not isinstance(body, dict):
+            return jsonify({"error": "the body must be a JSON object", "errors": ["the body must be a JSON object"]}), 400
+        try:
+            return jsonify({"window": make().set_window(body.get("start"), body.get("end"))})
+        except jobs.JobError as exc:
+            return jsonify({"error": str(exc), "errors": exc.errors}), 400
+
+    @app.route("/api/jobs/window", methods=["DELETE"])
+    def jobs_window_clear():
+        if not loopback_only(request):
+            return refuse_remote()
+        make().clear_window()
+        return jsonify({"window": None})
 
     for action in ("hold", "release", "remove"):
         app.add_url_rule("/api/jobs/<jid>/" + action, "jobs_" + action, (lambda a: lambda jid: transition(jid, a))(action), methods=["POST"])

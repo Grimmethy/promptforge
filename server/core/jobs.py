@@ -31,6 +31,17 @@ class JobError(ValueError):
         super().__init__("; ".join(self.errors))
 
 
+class JobStateError(JobError):
+    """The job exists but is in the wrong state for this operation."""
+
+
+EDITABLE = ("priority", "needed_by", "notes", "purpose", "positive", "negative", "seeds")
+_SPEC_KEYS = ("requester", "purpose", "commercial", "priority", "needed_by", "model", "positive", "negative", "width", "height", "steps", "cfg", "sampler",
+              "scheduler", "loras", "seeds", "destination", "card", "notes")
+WINDOW_MAX_HOURS = 12
+_STAMP = "%Y-%m-%dT%H:%M:%SZ"
+
+
 def default_root():
     return os.path.abspath(os.path.expanduser(os.environ.get("PROMPTFORGE_JOBS_DIR") or os.path.join("~", ".local", "share", "promptforge", "jobs")))
 
@@ -282,7 +293,7 @@ class JobStore:
         if rec is None:
             raise JobError("no job %s" % jid)
         if rec.get("state") not in allowed:
-            raise JobError("job %s is %s; this is allowed only from %s" % (jid, rec.get("state"), ", ".join(allowed)))
+            raise JobStateError("job %s is %s; this is allowed only from %s" % (jid, rec.get("state"), ", ".join(allowed)))
         return self.set_state(jid, target)
 
     def hold(self, jid):
@@ -293,6 +304,65 @@ class JobStore:
 
     def remove(self, jid):
         return self._transition(jid, ("queued", "held"), "removed")
+
+    def update(self, jid, patch):
+        """Edit a queued or held job. Only the keys in EDITABLE may change; the merged spec is validated like a new job and the licence rule is checked again.
+        Results, attempts, created_at and the id are never touched."""
+        rec = self.get(jid)
+        if rec is None:
+            raise JobError("no job %s" % jid)
+        if rec.get("state") not in ("queued", "held"):
+            raise JobStateError("job %s is %s; it can be edited only while queued or held" % (jid, rec.get("state")))
+        if not isinstance(patch, dict):
+            raise JobError("the changes must be an object")
+        bad = [k for k in patch if k not in EDITABLE]
+        if bad:
+            raise JobError("cannot edit: %s" % ", ".join(bad))
+        merged = {k: rec[k] for k in _SPEC_KEYS if k in rec}
+        merged.update(patch)
+        clean = normalize(merged)
+        problem = licence_problem(clean, self._lookup)
+        if problem:
+            raise JobError(problem)
+        return self.set_state(jid, rec["state"], {k: clean[k] for k in patch})
+
+    def _window_path(self):
+        return os.path.join(self.root, "window.json")
+
+    def window(self):
+        """The armed window {start, end, armed_at} or None. Arming only records it; nothing here starts a run."""
+        rec = _read(self._window_path())
+        return rec if rec and all(isinstance(rec.get(k), str) for k in ("start", "end", "armed_at")) else None
+
+    def set_window(self, start, end, now=None):
+        errs = []
+        parsed = {}
+        for name, value in (("start", start), ("end", end)):
+            try:
+                parsed[name] = datetime.datetime.strptime(value, _STAMP).replace(tzinfo=datetime.timezone.utc)
+            except (ValueError, TypeError):
+                errs.append("%s must be a UTC time like 2026-11-14T05:00:00Z" % name)
+        stamp = _utc(now or (self._clock() if self._clock else None))
+        if len(parsed) == 2:
+            if parsed["end"] <= parsed["start"]:
+                errs.append("end must be after start")
+            elif parsed["end"] - parsed["start"] > datetime.timedelta(hours=WINDOW_MAX_HOURS):
+                errs.append("a window can be at most %d hours long" % WINDOW_MAX_HOURS)
+            if parsed["end"] <= stamp:
+                errs.append("end must be in the future")
+        if errs:
+            raise JobError(errs)
+        rec = {"start": start, "end": end, "armed_at": stamp.strftime(_STAMP)}
+        os.makedirs(self.root, exist_ok=True)
+        _write_atomic(self._window_path(), rec)
+        return rec
+
+    def clear_window(self):
+        try:
+            os.unlink(self._window_path())
+            return True
+        except OSError:
+            return False
 
     def archive_old(self, days=30):
         """Move done, failed and removed records older than `days` into archive/. Returns their ids. Queued, held, running and blocked are never archived."""
