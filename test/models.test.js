@@ -46,13 +46,21 @@ test('planRows shows what will be installed and flags the warnings', () => {
     licence: { commercial_use: 'conditional', text: 'Image ok' }, destination: '/m/loras/f.safetensors', nsfw: true, warnings: ['the base model is unknown'] };
   const rows = M.planRows(plan);
   const get = l => rows.find(r => r.label === l);
-  assert.strictEqual(get('Size').text, '10.0 MB');
+  assert.strictEqual(get('Size').text, '10 MB');
   assert.strictEqual(get('Trigger words').text, 'x, y');
   assert.strictEqual(get('Licence').text, 'conditional (Image ok)');
   assert.strictEqual(get('Installs to').text, '/m/loras/f.safetensors');
   assert.ok(get('Note').warn && get('Warning').warn && !get('Name').warn);
   assert.deepStrictEqual(M.planRows(null), []);
   assert.strictEqual(M.planRows({ file: {}, licence: {} }).find(r => r.label === 'Size').text, 'unknown');
+});
+
+test('formatSize uses decimal GB from 1 GB up and whole MB below, and unknown for no size', () => {
+  assert.strictEqual(M.formatSize(6938504356), '6.9 GB');
+  assert.strictEqual(M.formatSize(228467712), '228 MB');
+  assert.strictEqual(M.formatSize(0), 'unknown');
+  assert.strictEqual(M.formatSize(undefined), 'unknown');
+  assert.strictEqual(M.planRows({ file: { size_bytes: 6938504356 }, licence: {} }).find(r => r.label === 'Size').text, '6.9 GB');
 });
 
 test('the Import button is enabled only for a checked plan that would not overwrite a file', () => {
