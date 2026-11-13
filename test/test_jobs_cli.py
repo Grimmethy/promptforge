@@ -10,7 +10,7 @@ import unittest
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "server"))
-from core import jobs  # noqa: E402
+from core import job_plan, jobs  # noqa: E402
 from scripts.jobs import cli  # noqa: E402
 
 
@@ -118,6 +118,43 @@ class ManageTest(CliBase):
     def test_bad_arguments_exit_1(self):
         self.assertEqual(self.run_cli("status", "--state", "paused"), 1)
         self.assertEqual(self.run_cli("frobnicate"), 1)
+
+
+class RunAndEstimateTest(CliBase):
+    def test_run_passes_its_options_to_the_runner_and_returns_its_code(self):
+        calls = []
+
+        def fake_run(store, pf, **kw):
+            calls.append((store, type(pf).__name__, kw))
+            return 3
+        code = cli.main(["run", "--limit", "5", "--requester", "mapforge", "--priority", "urgent", "--dry-run"], store=self.store, out=self.out.append,
+                        err=self.err.append, run_fn=fake_run)
+        self.assertEqual(code, 3)
+        (store, pf_name, kw), = calls
+        self.assertIs(store, self.store)
+        self.assertEqual(pf_name, "JobPF")
+        self.assertEqual((kw["limit"], kw["requester"], kw["priority"], kw["dry_run"]), (5, "mapforge", "urgent", True))
+        calls.clear()
+        cli.main(["run"], store=self.store, out=self.out.append, err=self.err.append, run_fn=fake_run)
+        self.assertEqual((calls[0][2]["limit"], calls[0][2]["requester"], calls[0][2]["priority"], calls[0][2]["dry_run"]), (0, None, None, False))
+
+    def test_run_rejects_a_bad_priority(self):
+        self.assertEqual(self.run_cli("run", "--priority", "soon"), 1)
+
+    def test_estimate_prints_one_line(self):
+        self.assertEqual(self.run_cli("estimate"), 0)
+        self.assertEqual(self.out, ["queue is empty"])
+        self.out.clear()
+        self.store.add(spec(seeds=[1, 2], width=1000, height=1000))
+        self.assertEqual(self.run_cli("estimate"), 0)
+        self.assertEqual(self.out, ["queued 1 jobs, 2 pictures, about 50s (rough)"])        # 0.35 s per MP-step x 28 x 2 pictures + 30 s model load
+        self.out.clear()
+        job_plan.append_timing(os.path.join(self.store.root, "timings.jsonl"), {"model": "NovaFlatILV9.safetensors", "width": 1000, "height": 1000, "steps": 28, "seconds": 10})
+        self.assertEqual(self.run_cli("estimate"), 0)
+        self.assertEqual(self.out, ["queued 1 jobs, 2 pictures, about 50s"])
+        self.out.clear()
+        self.assertEqual(self.run_cli("estimate", "--requester", "nobody"), 0)
+        self.assertEqual(self.out, ["queue is empty"])
 
 
 if __name__ == "__main__":
