@@ -529,6 +529,36 @@ def check_steps(value):
     return int(n)
 
 
+VERBATIM_POSITIVE_MAX, VERBATIM_NEGATIVE_MAX = 8000, 4000
+
+
+def _apply_verbatim(j, verbatim, krea):
+    """Replace the assembled prompt with the caller's exact text (the optional `verbatim` spec field {positive, negative}), used by the render job queue so a
+    frozen prompt reaches ComfyUI unchanged. No theme, style, quality or default-negative tags are added. A Krea 2 model has no negative text in its graph, so
+    its negative stays ''. Note: for an SDXL model with a LoRA stack the graph builder (core/comfy.py, loras.with_triggers) still prefixes the registry's
+    trigger words to the positive at render time. Characters and pose skeletons are ignored in this mode."""
+    err = "verbatim must be an object with a non-empty string positive and an optional string negative"
+    if not isinstance(verbatim, dict):
+        raise ValueError(err)
+    positive, negative = verbatim.get("positive"), verbatim.get("negative", "")
+    if not isinstance(positive, str) or not positive.strip() or not isinstance(negative, str):
+        raise ValueError(err)
+    if len(positive) > VERBATIM_POSITIVE_MAX:
+        raise ValueError("verbatim.positive is longer than %d characters" % VERBATIM_POSITIVE_MAX)
+    if len(negative) > VERBATIM_NEGATIVE_MAX:
+        raise ValueError("verbatim.negative is longer than %d characters" % VERBATIM_NEGATIVE_MAX)
+    j["positive"] = positive
+    j["negative"] = "" if krea else negative
+    j["prompt_used"] = {"positive": j["positive"], "negative": j["negative"]}
+    j["n_chars"] = 0
+    j["char_segments"] = []
+    for k in ("region_a", "region_b", "base"):
+        j.pop(k, None)
+    if j.pop("skeleton_png", None):
+        j["warnings"] = (j.get("warnings") or []) + ["pose skeleton ignored: a verbatim prompt has no characters"]
+    return j
+
+
 def resolve_job(spec):
     if spec.get("steps") is not None:
         spec = {**spec, "steps": check_steps(spec["steps"])}
@@ -694,6 +724,8 @@ def resolve_job(spec):
             if lora_warnings:
                 j["warnings"] = (j.get("warnings") or []) + lora_warnings
 
+    if spec.get("verbatim") is not None:
+        j = _apply_verbatim(j, spec["verbatim"], comfy.is_krea2(j["model"]))
     j["spec"] = spec
     j["nsfw"] = nsfw
     return j
