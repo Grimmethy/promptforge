@@ -807,6 +807,19 @@ function initModelsPanel() {
     const l = LORAS.loras.find(x => x.id === $('#loraAdd').value);
     if (l) { loraRows.push(PFModels.newRow(l)); renderLoras(); }
   };
+  const url = $('#impUrl');
+  const clearImport = () => {
+    url.value = '';
+    _impPlan = null;
+    $('#impGo').disabled = true;
+  };
+  url.addEventListener('focus', () => {
+    url.select();
+    url.addEventListener('mouseup', e => e.preventDefault(), { once: true });
+  });
+  url.addEventListener('keydown', e => { if (e.key === 'Escape') clearImport(); });
+  const clearBtn = $('#impClear');
+  if (clearBtn) clearBtn.onclick = clearImport;
   $('#impCheck').onclick = async () => {
     const out = $('#impPlan'); out.textContent = ''; $('#impGo').disabled = true; _impPlan = null;
     $('#impProg').textContent = 'Checking the link... (the site can take a minute to answer)'; $('#impCheck').disabled = true;
@@ -831,7 +844,7 @@ function initModelsPanel() {
         const job = await (await fetch('/api/models/import/' + j.job)).json();
         $('#impProg').textContent = PFModels.progressText(job);
         if (job.status === 'done' || job.status === 'error') {
-          if (job.status === 'done') { _impPlan = null; await loadLoras(); }
+          if (job.status === 'done') { _impPlan = null; await loadLoras(); url.focus(); url.select(); }
           if (job.needs_signin) { $('#impGo').disabled = false; refreshSession(true); }
           break;
         }
