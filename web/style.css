@@ -241,3 +241,13 @@ body.view-library #library { display: flex; flex-direction: column; flex: 1; min
   body.view-library #inputs { display: none; }
   body.view-library #library { padding: 10px; }
 }
+
+.queueBar { font-size: 11px; margin: -4px 0 6px; }
+.queueBar a { text-decoration: underline; cursor: pointer; }
+.queuePanel { border: 1px solid var(--border, #444); border-radius: 4px; padding: 6px; margin-bottom: 8px; font-size: 11px; max-height: 260px; overflow: auto; }
+.queuePanel h3 { margin: 6px 0 2px; font-size: 11px; }
+.queuePanel .qrow { display: flex; gap: 6px; align-items: center; padding: 2px 0; }
+.queuePanel .qrow .qtext { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.queuePanel select { width: auto; flex: 0 0 auto; padding: 1px 2px; font-size: 11px; }
+.queuePanel .qrow .qtext { min-width: 0; }
+.queuePanel .qrow button { flex: 0 0 auto; }
