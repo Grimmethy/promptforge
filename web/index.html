@@ -4,14 +4,21 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PromptForge Studio</title>
-<link rel="stylesheet" href="/style.css?v=20261113a">
+<link rel="stylesheet" href="/style.css?v=20261113b">
 </head>
 <body>
   <div id="inputs">
     <div class="scroll">
       <h1>PromptForge <span class="muted" style="font-size:11px">
         <span class="dot down" id="comfyDot"></span> <span id="comfyMsg">…</span></span></h1>
-      <div class="queueBar"><a href="#" id="queueSummary" class="muted" style="display:none"></a></div>
+      <div class="queueBar"><a href="#" id="queueSummary" class="muted" style="display:none"></a>
+        <button class="small" id="runQueueBtn" style="display:none">Run queue</button>
+        <button class="small" id="stopRunBtn" style="display:none">Stop</button></div>
+      <div id="runDialog" class="runDialog" style="display:none">
+        <div id="runDialogText"></div>
+        <div class="row"><label>Stop after <input id="runHours" type="text" value="2" size="4"> hours</label>
+          <button class="small" id="runStart">Start</button> <button class="small" id="runCancel">Cancel</button></div>
+      </div>
       <div id="queuePanel" class="queuePanel" style="display:none"></div>
       <label class="nsfwToggle"><input type="checkbox" id="nsfw"> NSFW content</label>
 
@@ -158,12 +165,12 @@
 <script src="/model-defaults.js?v=20261108c"></script>
 <script src="/licences.js?v=20261110a"></script>
 <script src="/tile-dedupe.js?v=20261108c"></script>
-<script src="/queue.js?v=20261113a"></script>
+<script src="/queue.js?v=20261113c"></script>
 <script src="/assign-model.js?v=20261110b"></script>
 <script src="/recipe.js?v=20261111a"></script>
 <script src="/library.js?v=20261112a"></script>
 <script src="/handoff.js?v=20261112a"></script>
 <script src="/models.js?v=20261111a"></script>
-<script src="/app.js?v=20261113a"></script>
+<script src="/app.js?v=20261113c"></script>
 </body>
 </html>
