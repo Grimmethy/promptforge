@@ -121,12 +121,20 @@ def _parse_until(until):
 
 
 def run(store, pf, *, limit=0, requester=None, priority=None, dry_run=False, owner="job-queue", deliver=None, timings_path=None, sleep=time.sleep,
-        now=time.time, wait=headroom.wait, out=print, until=None):
+        now=time.time, wait=headroom.wait, out=print, until=None, stop_file=None):
     try:
         until_ts = _parse_until(until)
     except (ValueError, TypeError):
         out("error: until must be a UTC time like 2026-11-14T05:00:00Z")
         return 1
+    def halt():
+        """Why the run must stop now (a stop-file exists, or the stop time has come), else None. Checked before each job and before each picture."""
+        if stop_file and os.path.exists(stop_file):
+            return "stop requested: stopping"
+        if until_ts is not None and now() >= until_ts:
+            return "window ended: stopping"
+        return None
+
     state_dir = os.path.join(store.root, ".runner")
     timings_path = timings_path or os.path.join(store.root, "timings.jsonl")
     if dry_run:
@@ -168,17 +176,18 @@ def run(store, pf, *, limit=0, requester=None, priority=None, dry_run=False, own
             job = job_plan.next_job(queued, last_requester)
             if job is None:
                 break
-            if until_ts is not None and now() >= until_ts:
-                out("window ended: stopping")
+            why = halt()
+            if why:
+                out(why)
                 break
             if not wait("light", 1800, 30, sleep, time.monotonic):
                 out("no headroom for 30 minutes: stopping")
                 code = 2
                 break
             last_requester = job["requester"]
-            outcome = _run_job(store, pf, job, available, st, owner, deliver, timings_path, now, out, beat, until_ts)
+            outcome = _run_job(store, pf, job, available, st, owner, deliver, timings_path, now, out, beat, halt)
             if outcome == "stopped":
-                out("window ended: stopping")
+                out(halt() or "window ended: stopping")
                 break
             if outcome == "failed":
                 fails += 1
@@ -217,7 +226,7 @@ def run(store, pf, *, limit=0, requester=None, priority=None, dry_run=False, own
             pass
 
 
-def _run_job(store, pf, job, available, st, owner, deliver, timings_path, now, out, beat, until_ts=None):
+def _run_job(store, pf, job, available, st, owner, deliver, timings_path, now, out, beat, halt=None):
     """Render one job. Returns 'done', 'failed', 'blocked' or 'stopped' (the window ended between pictures; the job is back in 'queued' with its results)."""
     if available and job["model"] not in available:
         store.set_state(job["id"], "blocked", {"error": "model %s is not installed in ComfyUI" % job["model"]})
@@ -230,7 +239,7 @@ def _run_job(store, pf, job, available, st, owner, deliver, timings_path, now, o
     todo = [s for s in rec["seeds"] if s not in have]
     failed, first_error = 0, None
     for i, seed in enumerate(todo):
-        if until_ts is not None and now() >= until_ts:
+        if halt is not None and halt():
             store.set_state(rec["id"], "queued", {"results": results})
             return "stopped"
         t0 = now()
