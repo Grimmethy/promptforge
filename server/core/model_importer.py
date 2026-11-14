@@ -235,16 +235,32 @@ def _check_file(name, size, max_bytes):
         raise ImportError_("the file is %d bytes, over the %d byte limit" % (size, max_bytes))
 
 
-def fetch_plan(link, fetcher=None, key=None, models_dir=None, max_bytes=None, type_override=None):
+def _registered_bases():
+    """The bases ('illustrious', 'pony' ...) of the checkpoints in the LoRA registry, as our base names; empty when none are registered."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    import loras
+    out = set()
+    for b in (loras.load_registry().get("checkpoints") or {}).values():
+        name = map_base(b) or (str(b).strip().lower() or None)
+        if name:
+            out.add(name)
+    return out
+
+
+def fetch_plan(link, fetcher=None, key=None, models_dir=None, max_bytes=None, type_override=None, prefer_bases=None, modelVersionId=None):
     """The plan for `link` (a URL string or parse_link's dict) WITHOUT downloading the model: {site, model_id, version_id, name, type, base_model,
     base, trained_words, file: {name, size_bytes, sha256, url}, folder, destination, nsfw, allow_commercial_use, licence: {commercial_use, text,
     source_url}, warnings}. `fetcher(url, headers)` returns bytes (default: urllib). ImportError_ for a type we cannot place, a non-safetensors
     file, a file over max_bytes (default: max_bytes_for the model's type) or an unreadable answer."""
     spec = parse_link(link) if isinstance(link, str) else link
     fetch = fetcher or default_fetcher
+    prefer = set(prefer_bases) if prefer_bases is not None else _registered_bases()
+    prefer = {p for p in prefer if p}
     try:
         if spec["site"] == "civitai":
-            plan = _plan_civitai(spec, fetch, key, max_bytes, type_override)
+            plan = _plan_civitai(spec, fetch, key, max_bytes, type_override, prefer, modelVersionId)
         else:
             plan = _plan_hf(spec, fetch, max_bytes, type_override)
     except ImportError_:
@@ -260,10 +276,12 @@ def fetch_plan(link, fetcher=None, key=None, models_dir=None, max_bytes=None, ty
         plan["warnings"].append("a file named %s is already installed and will not be overwritten" % plan["file"]["name"])
     if plan["base"] is None:
         plan["warnings"].append("the base model is unknown, so mismatches cannot be flagged")
+    elif prefer and plan["base"] not in prefer:
+        plan["warnings"].append("the selected base %s is used by no registered checkpoint" % plan["base"])
     return plan
 
 
-def _plan_civitai(spec, fetch, key, max_bytes, type_override):
+def _plan_civitai(spec, fetch, key, max_bytes, type_override, prefer_bases=frozenset(), modelVersionId=None):
     model = json.loads(fetch("https://civitai.com/api/v1/models/%d" % spec["model_id"], _headers(key)))
     if not isinstance(model, dict):
         raise ImportError_("unexpected answer from Civitai")
@@ -272,10 +290,28 @@ def _plan_civitai(spec, fetch, key, max_bytes, type_override):
         versions = [v for v in versions if v.get("id") == spec["version_id"]]
     if not versions:
         raise ImportError_("no matching version of this model")
-    ver = versions[0]
-    files = [f for f in ver.get("files") or [] if str(f.get("name", "")).lower().endswith(".safetensors")]
-    if not files:
+    candidates = []
+    for v in versions:
+        vfiles = [x for x in v.get("files") or [] if str(x.get("name", "")).lower().endswith(".safetensors")]
+        if vfiles:
+            candidates.append((v, vfiles))
+    if not candidates:
         raise ImportError_("only .safetensors files are accepted and this version has none")
+    if modelVersionId is not None:
+        chosen = [c for c in candidates if c[0].get("id") == modelVersionId]
+        if not chosen:
+            raise ImportError_("no matching version of this model")
+        ver, files = chosen[0]
+    else:
+        fitting = [c for c in candidates if map_base(c[0].get("baseModel")) in prefer_bases]
+        ver, files = (fitting or candidates)[0]
+    versions_out = []
+    for v, vfiles in candidates:
+        pf = next((x for x in vfiles if x.get("primary")), vfiles[0])
+        vsize = int(round(float(pf.get("sizeKB") or 0) * 1024))
+        vbase = v.get("baseModel")
+        versions_out.append({"id": v.get("id"), "name": v.get("name"), "base_model": vbase, "base": map_base(vbase),
+                             "file_name": os.path.basename(pf["name"]), "size_bytes": vsize or None, "selected": v is ver})
     f = next((x for x in files if x.get("primary")), files[0])
     size = int(round(float(f.get("sizeKB") or 0) * 1024))
     mtype = type_override or model.get("type")
@@ -290,7 +326,7 @@ def _plan_civitai(spec, fetch, key, max_bytes, type_override):
                      "url": f.get("downloadUrl") or "https://civitai.com/api/download/models/%s" % ver.get("id")},
             "nsfw": bool(model.get("nsfw")), "allow_commercial_use": flags,
             "licence": {"commercial_use": verdict, "text": text, "source_url": "https://civitai.com/models/%s" % model.get("id", spec["model_id"])},
-            "warnings": []}
+            "versions": versions_out, "warnings": []}
 
 
 def _plan_hf(spec, fetch, max_bytes, type_override):
@@ -311,6 +347,8 @@ def _plan_hf(spec, fetch, max_bytes, type_override):
             "base_model": None, "base": None, "trained_words": [],
             "file": {"name": name, "size_bytes": size or None, "sha256": ((entry.get("lfs") or {}).get("oid") or "").lower() or None,
                      "url": "https://huggingface.co/%s/resolve/%s/%s" % (spec["repo"], spec["rev"], urllib.parse.quote(spec["path"]))},
+            "versions": [{"id": spec["rev"], "name": name, "base_model": None, "base": None, "file_name": name,
+                          "size_bytes": size or None, "selected": True}],
             "nsfw": False, "allow_commercial_use": None,
             "licence": {"commercial_use": "unverified", "text": "Hugging Face file: licence not read, check the repository",
                         "source_url": "https://huggingface.co/%s" % spec["repo"]}, "warnings": []}
