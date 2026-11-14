@@ -65,7 +65,7 @@
         </div>
         <div id="importBox">
           <label>Import a model from a link (Civitai or Hugging Face)</label>
-          <input id="impUrl" placeholder="https://civitai.com/models/...">
+          <input id="impUrl" autocomplete="off" placeholder="https://civitai.com/models/..."> <button type="button" id="impClear" aria-label="Clear link">×</button>
           <select id="impType"><option value="">type: from the page</option><option value="lora">LoRA</option><option value="checkpoint">checkpoint</option><option value="embedding">embedding</option></select>
           <button type="button" id="impCheck" class="small">Check</button>
           <table id="impPlan"></table>
