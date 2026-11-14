@@ -251,3 +251,6 @@ body.view-library #library { display: flex; flex-direction: column; flex: 1; min
 .queuePanel select { width: auto; flex: 0 0 auto; padding: 1px 2px; font-size: 11px; }
 .queuePanel .qrow .qtext { min-width: 0; }
 .queuePanel .qrow button { flex: 0 0 auto; }
+.runDialog { border: 1px solid var(--border, #444); border-radius: 4px; padding: 8px; margin-bottom: 8px; font-size: 11px; }
+.runDialog .row { margin-top: 6px; }
+.runDialog input { width: 4em; display: inline-block; }
