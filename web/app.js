@@ -329,6 +329,54 @@ async function comfyStatus() {
         fillSelect('#model', s.checkpoints); decorateModels(); _prevModel = $('#model').value; }
     renderComfyBtn(s);
   } catch { $('#comfyMsg').textContent = '?'; }
+  queueStatus();
+}
+
+// The render job queue in the header: a one-line summary (and a panel behind it) fed by /api/jobs/estimate and /api/jobs. Called from comfyStatus's
+// existing poll and after every panel action; web/queue.js holds the pure formatting.
+async function queueStatus() {
+  const sum = $('#queueSummary'), panel = $('#queuePanel');
+  try {
+    const est = await fetch('/api/jobs/estimate').then(r => r.json());
+    const text = PFQueue.summaryText(est);
+    const jobsNow = ((await fetch('/api/jobs?state=queued').then(r => r.json())).jobs || [])
+      .concat((await fetch('/api/jobs?state=held').then(r => r.json())).jobs || []);
+    sum.textContent = text || (jobsNow.length ? 'Queue: ' + jobsNow.length + ' held' : '');
+    sum.style.display = sum.textContent ? '' : 'none';
+    if (!sum.textContent) panel.style.display = 'none';
+    sum.onclick = (e) => { e.preventDefault(); panel.style.display = panel.style.display === 'none' ? '' : 'none'; queueStatus(); };
+    if (panel.style.display !== 'none') renderQueuePanel(panel, jobsNow, est.per_job || {});
+  } catch { sum.style.display = 'none'; }
+}
+
+function renderQueuePanel(panel, jobs, perJob) {
+  panel.replaceChildren();
+  const act = async (id, what, body) => {
+    const r = await fetch('/api/jobs/' + id + '/' + what, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })
+      .then(r => r.json()).catch(() => ({ error: 'the server did not answer' }));
+    if (r.error) toast(r.error);
+    queueStatus();
+  };
+  for (const g of PFQueue.groupByRequester(jobs)) {
+    panel.append(el('h3', {}, g.requester + ' · ' + g.jobs.length + ' jobs · ' + g.pictures + ' pictures'));
+    for (const j of g.jobs) {
+      const row = PFQueue.jobRow(j, perJob);
+      const line = el('div', { class: 'qrow' });
+      line.append(el('span', { class: 'qtext', title: row.id }, (row.purpose || row.id) + ' · ' + row.model + ' · ' + row.seeds + ' seeds'
+        + (row.seconds != null ? ' · ~' + PFQueue.formatDuration(row.seconds) : '') + (row.state === 'held' ? ' · held' : '')));
+      if (row.canHold) {
+        const sel = el('select', { title: 'priority' });
+        for (const p of ['urgent', 'normal', 'bulk']) sel.append(el('option', { value: p }, p));
+        sel.value = row.priority;
+        sel.onchange = () => act(row.id, 'edit', { priority: sel.value });
+        line.append(sel);
+        line.append(el('button', { class: 'small', onclick: () => act(row.id, 'hold') }, 'Hold'));
+      }
+      if (row.canRelease) line.append(el('button', { class: 'small', onclick: () => act(row.id, 'release') }, 'Release'));
+      if (row.canRemove) line.append(el('button', { class: 'small', onclick: () => act(row.id, 'remove') }, 'Remove'));
+      panel.append(line);
+    }
+  }
 }
 
 function renderComfyBtn(s) {
