@@ -174,6 +174,65 @@ class PlanTest(unittest.TestCase):
             mi.fetch_plan("https://huggingface.co/o/r/blob/main/nope.safetensors", lambda u, h: json.dumps(tree).encode(), models_dir="/x", type_override="lora")
 
 
+MULTI_VERSION_SAMPLE = {"id": 4242, "name": "Multi Concept", "type": "LORA", "nsfw": False,
+                        "allowCommercialUse": ["Image"],
+                        "modelVersions": [
+                            {"id": 101, "name": "NAI-1", "baseModel": "NoobAI", "trainedWords": ["multi"],
+                             "files": [{"name": "multi-noobai.safetensors", "sizeKB": 100, "primary": True, "hashes": {},
+                                        "downloadUrl": "https://civitai.com/api/download/models/101"}]},
+                            {"id": 202, "name": "IL-1", "baseModel": "Illustrious", "trainedWords": ["multi"],
+                             "files": [{"name": "multi-illustrious.safetensors", "sizeKB": 200, "primary": True, "hashes": {},
+                                        "downloadUrl": "https://civitai.com/api/download/models/202"}]}]}
+
+
+def _is_mismatch(w):
+    """True for the base-mismatch warning (wording lives in fetch_plan only)."""
+    return "used by no registered checkpoint" in str(w).lower()
+
+
+class VersionSelectionTest(unittest.TestCase):
+    def plan(self, registered, **kw):
+        fetch = fetcher_for(MULTI_VERSION_SAMPLE)
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(mi, "_registered_bases", return_value=registered):
+            p = mi.fetch_plan("https://civitai.com/models/4242", fetch, models_dir=d, **kw)
+        self.assertGreaterEqual(len(fetch.calls), 1)
+        return p
+
+    def test_default_selects_fitting_base(self):
+        p = self.plan({"noobai"})
+        self.assertEqual(len(p["versions"]), 2)
+        sel = {v["id"]: v["selected"] for v in p["versions"]}
+        self.assertEqual(sel, {101: True, 202: False})
+        self.assertEqual(p["version_id"], 101)
+
+    def test_explicit_model_version_id_wins(self):
+        p = self.plan({"noobai"}, modelVersionId=202)
+        self.assertEqual(p["version_id"], 202)
+        sel = {v["id"]: v["selected"] for v in p["versions"]}
+        self.assertEqual(sel, {101: False, 202: True})
+
+    def test_versions_list_keys(self):
+        p = self.plan({"noobai"})
+        for v in p["versions"]:
+            self.assertEqual(set(v.keys()), {"id", "name", "base_model", "base", "file_name", "size_bytes", "selected"})
+        self.assertEqual([(v["id"], v["name"], v["base_model"], v["base"], v["file_name"], v["size_bytes"])
+                          for v in p["versions"]],
+                         [(101, "NAI-1", "NoobAI", "noobai", "multi-noobai.safetensors", 102400),
+                          (202, "IL-1", "Illustrious", "illustrious", "multi-illustrious.safetensors", 204800)])
+
+    def test_mismatch_warning_present(self):
+        p = self.plan({"noobai"}, modelVersionId=202)
+        self.assertTrue(any(_is_mismatch(w) for w in p["warnings"]), p["warnings"])
+
+    def test_no_warning_when_base_fits(self):
+        p = self.plan({"noobai"})
+        self.assertFalse(any(_is_mismatch(w) for w in p["warnings"]), p["warnings"])
+
+    def test_no_warning_when_no_checkpoints(self):
+        p = self.plan(set())
+        self.assertFalse(any(_is_mismatch(w) for w in p["warnings"]), p["warnings"])
+
+
 def make_plan(data, **kw):
     api = json.loads(json.dumps(SAMPLE_1564160))
     api["modelVersions"][0]["files"][0]["hashes"] = {"SHA256": hashlib.sha256(data).hexdigest()} if kw.pop("good_hash", True) else {"SHA256": "00" * 32}
