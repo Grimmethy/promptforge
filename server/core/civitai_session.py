@@ -120,12 +120,32 @@ def download(url, dest, runner=None, timeout=3600):
     raise SessionError("unavailable", err[:200])
 
 
-def start_login(popen=None):
+def _login_argv(py):
+    """Command for the sign-in window: the site-sessions console script next to the session python, else a -c import of its main()."""
+    args = ["--profile-dir", profile_dir(), "--port", str(port()), "--sites", os.path.abspath(SITES_FILE), "login", "civitai"]
+    script = os.path.join(os.path.dirname(py), "site-sessions")
+    if os.path.isfile(script) and os.access(script, os.X_OK):
+        return [script] + args
+    return [py, "-c", "import sys; from site_sessions.cli import main; sys.exit(main())"] + args
+
+
+def start_login(popen=None, wait=2.0):
     """Open a plain Brave window on the profile so the owner signs in by hand. Refuses a second window or a busy profile."""
     py = session_python()
     if not py:
         raise SessionError("unavailable", "session python not found")
     if (_login[0] is not None and _login[0].poll() is None) or port_busy():
         raise SessionError("busy", "a Civitai browser window is already open")
-    argv = [py, "-m", "site_sessions.cli", "--profile-dir", profile_dir(), "--port", str(port()), "--sites", os.path.abspath(SITES_FILE), "login", "civitai"]
-    _login[0] = (popen or subprocess.Popen)(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    argv = _login_argv(py)
+    proc = (popen or subprocess.Popen)(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    _login[0] = proc
+    try:
+        # one bounded wait, not a poll loop: a child that dies at once is reported as unavailable (route 503)
+        rc = proc.wait(timeout=wait)
+    except subprocess.TimeoutExpired:
+        return  # still running: the sign-in window is open
+    # the child exited within the wait: clear the handle so the next click is not refused as busy;
+    # a clean exit (rc 0) is accepted without raising (judgement call: the window was closed at once)
+    _login[0] = None
+    if rc != 0:
+        raise SessionError("unavailable", "the sign-in window did not start")
