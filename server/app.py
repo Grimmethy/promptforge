@@ -757,10 +757,18 @@ _IMPORT_KEEP = 20
 @app.route("/api/models/plan", methods=["POST"])
 def models_plan():
     """The importer's plan for a Civitai or Hugging Face link: what would be installed, where, its licence and warnings. Downloads nothing."""
-    b = request.get_json(silent=True) or {}
+    b = request.get_json(silent=True) or request.form.to_dict() or {}
+    raw_version = b.get("version_id")
+    if raw_version in (None, ""):
+        version_id = None
+    else:
+        try:
+            version_id = int(raw_version)
+        except (TypeError, ValueError):
+            return jsonify({"error": "version_id must be an integer"}), 400
     key = model_importer.load_key()
     try:
-        plan = model_importer.fetch_plan(str(b.get("url") or ""), IMPORT_IO["fetcher"], key, type_override=b.get("type") or None)
+        plan = model_importer.fetch_plan(str(b.get("url") or ""), IMPORT_IO["fetcher"], key, type_override=b.get("type") or None, modelVersionId=version_id)
     except model_importer.ImportError_ as e:
         return jsonify({"error": model_importer._scrub(e, key)}), 400
     return jsonify(plan)
