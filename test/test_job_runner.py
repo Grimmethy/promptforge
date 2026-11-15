@@ -499,5 +499,57 @@ class UntilTest(Base):
         self.assertEqual(pf.calls, [])
 
 
+class StopFileTest(Base):
+    def stop_file(self):
+        return os.path.join(self.root, ".runner", "stop")
+
+    def make_stop(self):
+        os.makedirs(os.path.dirname(self.stop_file()), exist_ok=True)
+        open(self.stop_file(), "w").close()
+
+    def test_a_stop_file_that_exists_before_the_run_renders_nothing(self):
+        a = self.add()
+        pf = FakePF()
+        self.make_stop()
+        self.assertEqual(self.run_runner(pf, stop_file=self.stop_file()), 0)
+        self.assertEqual((self.state(a["id"]), pf.calls.count("generate")), ("queued", 0))
+        self.assertEqual(self.store.get(a["id"])["attempts"], 0)
+        self.assertEqual(self.out.count("stop requested: stopping"), 1)
+
+    def test_a_stop_file_created_between_pictures_stops_the_job_with_its_pictures_kept(self):
+        a = self.add(seeds=[1, 2, 3])
+        b = self.add(requester="b", seeds=[1])
+        pf = FakePF()
+        orig = pf.generate
+
+        def generate(spec):
+            gen = orig(spec)
+            self.make_stop()                         # the owner clicked Stop while the first picture was rendering
+            return gen
+        pf.generate = generate
+        self.assertEqual(self.run_runner(pf, stop_file=self.stop_file()), 0)
+        rec = self.store.get(a["id"])
+        self.assertEqual((rec["state"], [(r["seed"], r["status"]) for r in rec["results"]]), ("queued", [(1, "ok")]))
+        self.assertEqual(self.state(b["id"]), "queued")
+        self.assertEqual(self.out.count("stop requested: stopping"), 1)
+        self.assertNotIn("window ended: stopping", self.out)
+        self.assertEqual(pf.calls[-1], "release")
+
+    def test_a_stop_file_that_does_not_exist_changes_nothing(self):
+        a = self.add(seeds=[1, 2])
+        pf = FakePF()
+        self.assertEqual(self.run_runner(pf, stop_file=self.stop_file()), 0)
+        self.assertEqual((self.state(a["id"]), pf.calls.count("generate")), ("done", 2))
+        self.assertEqual(self.run_runner(FakePF(), stop_file=None), 0)
+
+    def test_the_stop_request_wins_the_message_over_the_stop_time(self):
+        self.add()
+        pf = FakePF()
+        self.make_stop()
+        self.run_runner(pf, stop_file=self.stop_file(), until=runner._iso(1_800_000_000.0 - 10), now=lambda: 1_800_000_000.0)
+        self.assertEqual(self.out.count("stop requested: stopping"), 1)
+        self.assertNotIn("window ended: stopping", self.out)
+
+
 if __name__ == "__main__":
     unittest.main()
