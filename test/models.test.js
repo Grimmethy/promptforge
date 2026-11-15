@@ -86,6 +86,23 @@ test('progressText says when the download goes through the signed-in session', (
   assert.strictEqual(M.progressText({ status: 'downloading', bytes: 3145728 }), 'Downloading 3 MB');
 });
 
+test('keyWarningShown is true only for a plan carrying the key warning when no key is configured', () => {
+  const KEY = 'Civitai needs an API key to download this file: add one in the Models panel';
+  assert.strictEqual(M.keyWarningShown({ warnings: [KEY] }, false), true);
+  assert.strictEqual(M.keyWarningShown({ warnings: [KEY] }, true), false);
+  assert.strictEqual(M.keyWarningShown({ warnings: [KEY] }, undefined), false);
+  assert.strictEqual(M.keyWarningShown({ warnings: ['the base model is unknown'] }, false), false);
+  assert.strictEqual(M.keyWarningShown({ warnings: [KEY + '.'] }, false), false);
+  assert.strictEqual(M.keyWarningShown({}, false), false);
+  assert.strictEqual(M.keyWarningShown(null, false), false);
+});
+
+test('keyStatusText words the Civitai API key state', () => {
+  assert.strictEqual(M.keyStatusText(true), 'Civitai API key: configured');
+  assert.strictEqual(M.keyStatusText(false), 'Civitai API key: not set');
+  assert.strictEqual(M.keyStatusText(undefined), 'Civitai API key: not set');
+});
+
 test('sessionLine words the Civitai sign-in state and when the button works', () => {
   assert.deepStrictEqual(M.sessionLine({ available: true, signed_in: true }), { text: 'Civitai sign-in: signed in', canSignIn: true });
   assert.deepStrictEqual(M.sessionLine({ available: true, signed_in: false }), { text: 'Civitai sign-in: not signed in', canSignIn: true });
