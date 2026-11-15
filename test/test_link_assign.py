@@ -2,6 +2,7 @@
 (success, role full 409, unreachable, partial failure), the sidecar's links appended once, the tile badge data, pre-selection and path safety.
 A temp gallery and a local stub HTTP server: no CharacterForge, no ComfyUI, no GPU (python3 -m unittest discover -s test -p 'test_*.py')."""
 import email.parser
+import hashlib
 import json
 import os
 import sys
@@ -106,6 +107,15 @@ class AssignBase(unittest.TestCase):
         with open(self.side) as fh:
             return json.load(fh).get("links", [])
 
+    def snapshot(self):
+        out = {}
+        for root, _, files in os.walk(self.tmp.name):
+            for f in files:
+                fp = os.path.join(root, f)
+                with open(fp, "rb") as fh:
+                    out[os.path.relpath(fp, self.tmp.name)] = hashlib.sha256(fh.read()).hexdigest()
+        return out
+
 
 class AssignRouteTest(AssignBase):
     def test_copies_the_image_with_the_contract_fields_and_records_the_link(self):
@@ -163,12 +173,14 @@ class AssignRouteTest(AssignBase):
         self.assertEqual([l["slug"] for l in self.links()], ["Gobs"])
 
     def test_an_unreachable_target_is_a_clear_message_and_the_image_is_untouched(self):
+        before = self.snapshot()  # image and sidecar, byte for byte
         with mock.patch.dict(os.environ, {"PROMPTFORGE_LINK_TARGETS": "characterforge=http://127.0.0.1:9"}):
             r = self.assign({"targets": [{"slug": "Gobs", "role": "pose"}]})
         self.assertEqual(r.status_code, 502)
         self.assertIn("not reachable", r.get_json()["error"])
         self.assertIn("not touched", r.get_json()["error"])
         self.assertEqual(self.links(), [])
+        self.assertEqual(self.snapshot(), before)
         with open(os.path.join(self.tmp.name, self.rel), "rb") as fh:
             self.assertEqual(fh.read(), b"\x89PNGgallery-bytes")
 
@@ -195,10 +207,13 @@ class AssignRouteTest(AssignBase):
         self.assertEqual(Stub.posts, [])
 
     def test_path_safety_reuses_the_gallery_path_guard(self):
-        self.assertEqual(self.assign({"targets": [{"slug": "Gobs", "role": "pose"}]}, rel="../../etc/passwd").status_code, 404)
-        self.assertEqual(self.assign({"targets": [{"slug": "Gobs", "role": "pose"}]}, rel="2026-11/missing_0.png").status_code, 404)
-        self.assertEqual(self.assign({"targets": [{"slug": "Gobs", "role": "pose"}]}, rel="2026-11/bbbbbbb1.json").status_code, 404)
+        before = self.snapshot()
+        for rel in ("../../etc/passwd", "2026-11/../../outside.png", "2026-11/missing_0.png", "2026-11/bbbbbbb1.json"):
+            r = self.assign({"targets": [{"slug": "Gobs", "role": "pose"}]}, rel=rel)
+            self.assertTrue(400 <= r.status_code < 500, rel)
+        self.assertEqual(self.snapshot(), before)  # no file in the gallery was created, changed or removed
         self.assertEqual(Stub.posts, [])
+        self.assertIsNone(pf._safe_gallery_path("/etc/passwd"))  # an absolute relpath is refused by the guard itself
 
 
 class TargetsAndBadgeTest(AssignBase):
