@@ -6,7 +6,7 @@ import os
 
 from flask import jsonify, request
 
-from core import job_plan, jobs
+from core import job_plan, job_run, jobs
 
 _PROXY_HEADERS = ("X-Forwarded-For", "Forwarded", "X-Real-IP")
 _LOCAL = ("127.0.0.1", "::1")
@@ -25,7 +25,7 @@ def _counts(records):
     return out
 
 
-def register(app, store_factory=None):
+def register(app, store_factory=None, spawn=None, kill=None):
     make = store_factory or (lambda: jobs.JobStore())
 
     def refuse_remote():
@@ -133,6 +133,31 @@ def register(app, store_factory=None):
             return refuse_remote()
         make().clear_window()
         return jsonify({"window": None})
+
+    @app.route("/api/jobs/run", methods=["GET"])
+    def jobs_run_status():
+        return jsonify(job_run.status(make()))
+
+    @app.route("/api/jobs/run", methods=["POST"])
+    def jobs_run_start():
+        if not loopback_only(request):
+            return refuse_remote()
+        body = request.get_json(force=True, silent=True)
+        if body is not None and not isinstance(body, dict):
+            return jsonify({"error": "the body must be a JSON object"}), 400
+        try:
+            return jsonify(job_run.start(make(), (body or {}).get("hours"), spawn=spawn)), 202
+        except job_run.RunError as exc:
+            return jsonify({"error": str(exc)}), exc.status
+
+    @app.route("/api/jobs/run/stop", methods=["POST"])
+    def jobs_run_stop():
+        if not loopback_only(request):
+            return refuse_remote()
+        try:
+            return jsonify(job_run.stop(make(), **({"kill": kill} if kill else {})))
+        except job_run.RunError as exc:
+            return jsonify({"error": str(exc)}), exc.status
 
     for action in ("hold", "release", "remove"):
         app.add_url_rule("/api/jobs/<jid>/" + action, "jobs_" + action, (lambda a: lambda jid: transition(jid, a))(action), methods=["POST"])
