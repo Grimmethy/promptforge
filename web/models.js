@@ -54,7 +54,22 @@
     if (s.signed_in === false) return { text: 'Civitai sign-in: not signed in', canSignIn: true };
     return { text: 'Civitai sign-in: unknown' + (s.error ? ' (' + s.error + ')' : ''), canSignIn: true };
   };
-  const api = { sessionLine, fits, baseOf, available, newRow, toSpec, notForSale, sellWarning, planRows, canImport, progressText, weightOf, formatSize };
+  // the hosts we can check a pasted model link from; a subdomain of any of them counts
+  const MODEL_HOSTS = ['civitai.com', 'civitai.red', 'huggingface.co'];
+  // is the pasted text an http(s) link to one of those hosts? (a bare word, another site, or a lookalike like evilcivitai.com is not)
+  const isModelLink = text => {
+    if (typeof text !== 'string') return false;
+    let u;
+    try { u = new URL(text.trim()); } catch (e) { return false; }
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+    const h = u.hostname.toLowerCase();
+    return MODEL_HOSTS.some(d => h === d || h.endsWith('.' + d));
+  };
+  // a paste starts the check only when it is a model link
+  const shouldAutoCheck = pastedText => isModelLink(pastedText);
+  // after a check, focus Import only when the check result would allow an import (the same gate as canImport); otherwise no focus move
+  const nextFocusAfterCheck = checkResult => (canImport(checkResult) ? 'impGo' : null);
+  const api = { sessionLine, fits, baseOf, available, newRow, toSpec, notForSale, sellWarning, planRows, canImport, progressText, weightOf, formatSize, isModelLink, shouldAutoCheck, nextFocusAfterCheck };
   root.PFModels = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
