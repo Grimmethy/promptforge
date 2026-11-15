@@ -784,6 +784,32 @@ def models_import():
     return jsonify({"job": jid}), 202
 
 
+@app.route("/api/models/key", methods=["PUT"])
+def models_key_put():
+    """Store the Civitai API key. Needs {api_key} in the JSON body; the key is never echoed back or logged."""
+    b = request.get_json(silent=True)
+    if not isinstance(b, dict):
+        b = {}
+    api_key = b.get("api_key")
+    if not isinstance(api_key, str) or not api_key.strip():
+        return jsonify({"error": "api_key is required: a non-empty string"}), 400
+    model_importer.save_key(api_key.strip())
+    return jsonify({"configured": True})
+
+
+@app.route("/api/models/key", methods=["GET"])
+def models_key_get():
+    """Whether a Civitai API key is stored. Returns a bool only, never the key."""
+    return jsonify({"configured": model_importer.key_status()})
+
+
+@app.route("/api/models/key", methods=["DELETE"])
+def models_key_delete():
+    """Remove the stored Civitai API key."""
+    model_importer.delete_key()
+    return jsonify({"configured": False})
+
+
 def _run_import(job, url, type_override):
     key = model_importer.load_key()
     try:

@@ -81,6 +81,14 @@
           <div id="impSess" class="muted"><span id="impSessText"></span> <button type="button" id="impSignIn" class="small">Sign in to Civitai</button></div>
         </div>
         <div id="installedLoras"></div>
+        <div id="keyBox">
+          <label for="keyInput">Civitai API key</label>
+          <input type="password" id="keyInput" autocomplete="off" placeholder="paste your Civitai API key">
+          <button type="button" id="keySave" class="small">Save</button>
+          <button type="button" id="keyDel" class="small">Delete</button>
+          <span id="keyStatus" class="muted"></span>
+          <div class="muted">Create a key in your Civitai account settings, under API Keys.</div>
+        </div>
       </details>
 
       <details>
