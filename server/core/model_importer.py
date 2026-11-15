@@ -19,6 +19,7 @@ import shutil
 import socket
 import struct
 import sys
+import tempfile
 import threading
 import http.client
 import urllib.error
@@ -159,6 +160,17 @@ def default_fetcher(url, headers=None, deadline=None):
     return box["body"]
 
 
+def default_head(url, headers=None, deadline=None):
+    """HEAD `url` and return the HTTP status code (a 4xx/5xx comes back as its code, not an exception). Redirects are followed; the timeout is `deadline` seconds (default 20)."""
+    limit = FETCH_DEADLINE if deadline is None else deadline
+    req = urllib.request.Request(url, headers=dict(headers or {}, **{"User-Agent": "promptforge-importer/1"}), method="HEAD")
+    try:
+        with _opener().open(req, timeout=limit) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
 def default_downloader(url, dest, headers=None, max_bytes=MAX_BYTES, progress=None):
     """Stream `url` into the file `dest`; ImportError_ when the body grows past max_bytes. progress(bytes_so_far, total_or_None)."""
     req = urllib.request.Request(url, headers=dict(headers or {}, **{"User-Agent": "promptforge-importer/1"}))
@@ -167,7 +179,7 @@ def default_downloader(url, dest, headers=None, max_bytes=MAX_BYTES, progress=No
         resp = _opener().open(req, timeout=60)
     except urllib.error.HTTPError as e:
         if e.code in (401, 403) and "civitai" in (urllib.parse.urlparse(url).hostname or ""):
-            raise AuthRequired("Civitai needs you signed in to download this file")
+            raise AuthRequired("Civitai refused the download (401). It needs an API key: add or replace it in the Models panel.")
         raise
     with resp as r, open(dest, "wb") as out:
         total = int(r.headers.get("Content-Length") or 0) or None
@@ -192,6 +204,49 @@ def load_key(config_path=None):
     except (OSError, ValueError, AttributeError):
         return None
     return k.strip() if isinstance(k, str) and k.strip() else None
+
+
+def save_key(api_key, config_path=None):
+    """Store the Civitai API key in the key file (directory mode 0700, file mode 0600), written to a temp file and moved into place atomically.
+    TypeError or ValueError for bad input. The key is never logged or included in an error message."""
+    if not isinstance(api_key, str):
+        raise TypeError("the API key must be a string")
+    value = api_key.strip()
+    if not value:
+        raise ValueError("the API key is empty")
+    path = config_path or KEY_PATH
+    directory = os.path.dirname(os.path.abspath(path))
+    if not os.path.isdir(directory):
+        os.makedirs(directory, mode=0o700, exist_ok=True)
+        os.chmod(directory, 0o700)
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".civitai-", suffix=".tmp")
+    try:
+        try:
+            os.fchmod(fd, 0o600)
+            os.write(fd, json.dumps({"api_key": value}).encode("utf-8"))
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def key_status(config_path=None):
+    """True when a Civitai API key is stored. Returns a bool only, never the key."""
+    return load_key(config_path) is not None
+
+
+def delete_key(config_path=None):
+    """Remove the stored Civitai API key. Succeeds when the key file is already absent."""
+    try:
+        os.remove(config_path or KEY_PATH)
+    except FileNotFoundError:
+        pass
 
 
 def _scrub(text, key):
@@ -244,7 +299,7 @@ def _check_file(name, size, max_bytes, mtype=None):
         raise OversizeError("%s, over the %s limit for %ss" % (_gb_text(size), _gb_text(max_bytes), str(mtype or "model").lower()))
 
 
-def fetch_plan(link, fetcher=None, key=None, models_dir=None, max_bytes=None, type_override=None):
+def fetch_plan(link, fetcher=None, key=None, models_dir=None, max_bytes=None, type_override=None, head=None):
     """The plan for `link` (a URL string or parse_link's dict) WITHOUT downloading the model: {site, model_id, version_id, name, type, base_model,
     base, trained_words, file: {name, size_bytes, sha256, url}, folder, destination, nsfw, allow_commercial_use, licence: {commercial_use, text,
     source_url}, warnings}. `fetcher(url, headers)` returns bytes (default: urllib). ImportError_ for a type we cannot place, a non-safetensors
@@ -271,6 +326,12 @@ def fetch_plan(link, fetcher=None, key=None, models_dir=None, max_bytes=None, ty
         plan["warnings"].append("a file named %s is already installed and will not be overwritten" % plan["file"]["name"])
     if plan["base"] is None:
         plan["warnings"].append("the base model is unknown, so mismatches cannot be flagged")
+    if key is None and plan["site"] == "civitai":
+        try:
+            if (head or default_head)(plan["file"]["url"], deadline=FETCH_DEADLINE) == 401:
+                plan["warnings"].append("Civitai needs an API key to download this file: add one in the Models panel")
+        except Exception:
+            pass
     return plan
 
 

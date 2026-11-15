@@ -54,7 +54,13 @@
     if (s.signed_in === false) return { text: 'Civitai sign-in: not signed in', canSignIn: true };
     return { text: 'Civitai sign-in: unknown' + (s.error ? ' (' + s.error + ')' : ''), canSignIn: true };
   };
-  const api = { sessionLine, fits, baseOf, available, newRow, toSpec, notForSale, sellWarning, planRows, canImport, progressText, weightOf, formatSize };
+  // the warning shown when a plan needs a Civitai API key that is not configured yet
+  const KEY_WARNING = 'Civitai needs an API key to download this file: add one in the Models panel';
+  // true only when no key is configured (strictly false) and the plan carries the key warning
+  const keyWarningShown = (plan, configured) => configured === false && Array.isArray(plan && plan.warnings) && plan.warnings.includes(KEY_WARNING);
+  // the Civitai API key status line for the Models panel
+  const keyStatusText = configured => (configured === true ? 'Civitai API key: configured' : 'Civitai API key: not set');
+  const api = { sessionLine, fits, baseOf, available, newRow, toSpec, notForSale, sellWarning, planRows, canImport, progressText, weightOf, formatSize, keyWarningShown, keyStatusText };
   root.PFModels = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
