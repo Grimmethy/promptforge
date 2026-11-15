@@ -39,6 +39,9 @@ QUARANTINE_DIR = ".quarantine"
 _DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data")
 REGISTRY_PATH = os.path.join(_DATA, "loras.json")
 LICENSES_PATH = os.path.join(_DATA, "model-licenses.json")
+LOCAL_DIR = os.path.join(_DATA, "local")
+LOCAL_REGISTRY_PATH = os.path.join(LOCAL_DIR, "loras.json")
+LOCAL_LICENSES_PATH = os.path.join(LOCAL_DIR, "model-licenses.json")
 _BASES = (("illustrious", "illustrious"), ("pony", "pony"), ("noob", "noobai"), ("anima", "anima"), ("krea", "krea2"), ("sdxl", "sdxl"))
 
 
@@ -439,7 +442,7 @@ def _slug(text):
 
 def register(plan, registry_path=None):
     """Add or update the LoRA registry entry (or the checkpoint's base) for the imported file; returns the registry id or None."""
-    path = registry_path or REGISTRY_PATH
+    path = registry_path or LOCAL_REGISTRY_PATH
     reg = _read_json(path, {"loras": [], "checkpoints": {}})
     reg.setdefault("loras", [])
     reg.setdefault("checkpoints", {})
@@ -468,7 +471,7 @@ def register(plan, registry_path=None):
 
 def record_licence(plan, licenses_path=None):
     """Add or update the model-licenses.json row keyed by the file name."""
-    path = licenses_path or LICENSES_PATH
+    path = licenses_path or LOCAL_LICENSES_PATH
     lic = _read_json(path, {})
     lic[plan["file"]["name"]] = {"source_url": plan["licence"]["source_url"], "licence": plan["licence"]["text"],
                                  "commercial_use": plan["licence"]["commercial_use"],
