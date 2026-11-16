@@ -103,6 +103,46 @@ class WiringTest(unittest.TestCase):
             self.assertIn("act(row.id, " + what, panel)
         self.assertNotRegex(panel, r"/api/jobs/run|forge")
 
+    def test_queue_rows_have_distinct_labels_and_full_titles(self):
+        # SOURCE-LEVEL check, not render-level. This harness loads only web/queue.js
+        # under node (js() helper) and has no DOM stub, so renderQueuePanel cannot run
+        # here. We assert on the generated label and panel source in web/app.js instead.
+        app = read("app.js")
+        self.assertIn("function queueRowLabel(", app)
+        label = app[app.index("function queueRowLabel("):app.index("function renderQueuePanel")]
+        panel = app[app.index("function renderQueuePanel"):app.index("function renderComfyBtn")]
+
+        # Distinct visible text: the panel passes sharedPrefix to queueRowLabel,
+        # and the label strips the shared prefix from the purpose.
+        self.assertIn("sharedPrefix", label)
+        self.assertRegex(panel, r"queueRowLabel\(\s*\w+\s*,\s*sharedPrefix\s*\)")
+        self.assertRegex(label, r"sharedPrefix\.length|startsWith\(\s*sharedPrefix|replace\(\s*sharedPrefix")
+
+        # Estimate: read from perJob[job.id] and rendered as "~N s".
+        # The literal "seconds" is deliberately not required: the code uses perJob[j.id] as a number.
+        self.assertRegex(panel, r"perJob\[[^\]]+\]")
+        self.assertIn("~", panel)
+        self.assertIn("' s'", panel)
+
+        # Title contract: full purpose, then the first 80 chars of the prompt.
+        self.assertNotIn("title: row.id", panel)
+        self.assertRegex(panel, r"fullPurpose|purpose")
+        self.assertRegex(panel, r"slice\(\s*0\s*,\s*80\s*\)|substring\(\s*0\s*,\s*80\s*\)")
+
+
+@unittest.skipUnless(NODE, "node is not installed")
+class QueueRowLabelTest(unittest.TestCase):
+    def test_shared_prefix_rows_get_distinct_visible_labels(self):
+        # queueRowLabel is pure, so its source is taken from web/app.js and run under node.
+        app = read("app.js")
+        start = app.index("function queueRowLabel(")
+        fn = app[start:app.index("\n}\n", start) + 3]
+        prefix = "Christmas coloring book - page "
+        code = fn + "\nconsole.log(JSON.stringify([queueRowLabel({id: 'a', purpose: %s}, %s), queueRowLabel({id: 'b', purpose: %s}, %s)]));" % (json.dumps(prefix + "3"), json.dumps(prefix), json.dumps(prefix + "4"), json.dumps(prefix))
+        labels = json.loads(subprocess.run([NODE, "-e", code], capture_output=True, text=True, check=True).stdout)
+        self.assertNotEqual(labels[0], labels[1])
+        self.assertTrue(all(labels))
+
 
 @unittest.skipUnless(NODE, "node is not installed")
 class RunHelpersTest(unittest.TestCase):
