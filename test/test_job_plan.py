@@ -128,6 +128,35 @@ class EstimateTest(unittest.TestCase):
         self.assertEqual(jobs, before)
 
 
+class FiledOrderTest(unittest.TestCase):
+    def test_filed_us_decides_before_the_id(self):
+        a = job("job-z", created="2026-11-13T10:00:00Z")
+        a["filed_us"] = 1
+        b = job("job-a", created="2026-11-13T10:00:00Z")
+        b["filed_us"] = 2
+        self.assertEqual(ids(job_plan.order_jobs([b, a])), ["job-z", "job-a"])
+
+    def test_same_filed_us_falls_back_to_the_id(self):
+        a = job("job-b", created="2026-11-13T10:00:00Z")
+        b = job("job-a", created="2026-11-13T10:00:00Z")
+        a["filed_us"] = b["filed_us"] = 5
+        self.assertEqual(ids(job_plan.order_jobs([a, b])), ["job-a", "job-b"])
+
+    def test_old_records_without_filed_us_sort_by_created_at_then_id(self):
+        jobs_ = [job("b", created="2026-11-13T10:00:00Z"), job("a", created="2026-11-13T10:00:00Z"), job("c", created="2026-11-13T09:00:00Z")]
+        self.assertEqual(ids(job_plan.order_jobs(jobs_)), ["c", "a", "b"])
+
+    def test_a_fixed_clock_store_runs_jobs_in_filing_order(self):
+        import datetime
+        from core import jobs
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        now = datetime.datetime(2026, 11, 13, 10, 0, 0, tzinfo=datetime.timezone.utc)
+        store = jobs.JobStore(os.path.join(tmp.name, "jobs"), lookup=lambda n: {"commercial_use": "yes"}, clock=lambda: now)
+        filed = [store.add({"requester": "a", "model": "M.safetensors", "positive": "p%d" % i, "width": 512, "height": 512, "seeds": [1]})["id"] for i in range(20)]
+        self.assertEqual(ids(job_plan.order_jobs(store.list())), filed)
+
+
 class TimingFileTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
