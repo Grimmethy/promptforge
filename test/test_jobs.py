@@ -238,6 +238,29 @@ class StoreTest(unittest.TestCase):
         self.assertIsNone(s.get(ids["done"]))
 
 
+class FiledUsTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = os.path.join(self.tmp.name, "jobs")
+        self.store = jobs.JobStore(self.root, lookup=lookup_for({"NovaFlatILV9.safetensors": "yes"}), clock=lambda: NOW)
+
+    def test_filed_us_is_an_int_and_strictly_increasing_for_rapid_adds(self):
+        vals = [self.store.add(spec(requester="r%d" % i))["filed_us"] for i in range(200)]
+        self.assertTrue(all(isinstance(v, int) for v in vals))
+        self.assertTrue(all(b > a for a, b in zip(vals, vals[1:])))
+
+    def test_an_old_record_without_filed_us_reads_as_zero(self):
+        j = self.store.add(spec())
+        path = os.path.join(self.root, "queued", j["id"] + ".json")
+        with open(path, encoding="utf-8") as fh:
+            old = json.load(fh)
+        del old["filed_us"]
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(old, fh)
+        self.assertEqual(self.store.get(j["id"])["filed_us"], 0)
+
+
 class UpdateTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
