@@ -813,7 +813,10 @@ function initModelsPanel() {
     try {
       const r = await fetch('/api/models/plan', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: $('#impUrl').value.trim(), type: $('#impType').value || undefined }) });
       const plan = await r.json();
-      if (!r.ok) { $('#impProg').textContent = 'Could not check it: ' + (plan.error || r.status); return; }
+      if (!r.ok) {
+        if (plan && typeof plan === 'object') { PFModels.planRows(plan).forEach(row => out.append(el('tr', { class: row.warn ? 'warn' : '' }, [el('td', {}, row.label), el('td', {}, row.text)]))); }
+        $('#impProg').textContent = 'Could not check it: ' + ((plan && plan.error) || r.status); $('#impGo').disabled = true; return;
+      }
       _impPlan = plan; $('#impProg').textContent = '';
       PFModels.planRows(plan).forEach(row => out.append(el('tr', { class: row.warn ? 'warn' : '' }, [el('td', {}, row.label), el('td', {}, row.text)])));
       $('#impGo').disabled = !PFModels.canImport(plan);
