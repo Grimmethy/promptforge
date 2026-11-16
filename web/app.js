@@ -1038,6 +1038,7 @@ async function openAssign(file, meta) {
     return;
   }
   Object.assign(_asg, { target: t, role: (t.roles || [])[0] });
+  (t.entries || []).forEach(e => { if (e.counts) _asg.counts[e.slug] = e.counts; });   // counts ride on the one link-targets GET
   (t.preselect || []).forEach(s => _asg.sel.add(s));
   await refreshCounts(); drawAssign();
 }
