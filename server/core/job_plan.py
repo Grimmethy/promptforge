@@ -20,7 +20,8 @@ def _level(job):
 
 
 def _own_key(job):
-    return (job.get("created_at") or "", job.get("id") or "")
+    # the middle element is the filing order (filed_us) that keeps same-second jobs in the order they were filed
+    return (job.get("created_at") or "", int(job.get("filed_us") or 0), job.get("id") or "")
 
 
 def _round_robin(jobs, last_requester):

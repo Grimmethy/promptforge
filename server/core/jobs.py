@@ -40,6 +40,9 @@ _SPEC_KEYS = ("requester", "purpose", "commercial", "priority", "needed_by", "mo
               "scheduler", "loras", "seeds", "destination", "card", "notes")
 WINDOW_MAX_HOURS = 12
 _STAMP = "%Y-%m-%dT%H:%M:%SZ"
+_EPOCH = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
+_FILED_LOCK = threading.Lock()
+_LAST_FILED_US = 0
 
 
 def default_root():
@@ -56,6 +59,14 @@ def _is_num(v):
 
 def _utc(now=None):
     return (now or datetime.datetime.now(datetime.timezone.utc)).astimezone(datetime.timezone.utc)
+
+
+def _next_filed_us(now_us):
+    """Filing time in microseconds, strictly greater than every value this process handed out before (two adds in one microsecond keep filing order)."""
+    global _LAST_FILED_US
+    with _FILED_LOCK:
+        _LAST_FILED_US = now_us if now_us > _LAST_FILED_US else _LAST_FILED_US + 1
+        return _LAST_FILED_US
 
 
 def _is_krea(model):
@@ -155,9 +166,10 @@ def normalize(spec, now=None, rand=None):
     if errs:
         raise JobError(errs)
     stamp = _utc(now)
+    filed_us = (stamp - _EPOCH) // datetime.timedelta(microseconds=1)
     make = rand or (lambda: secrets.token_hex(3))
     return {"version": VERSION, "id": "job-%s-%s" % (stamp.strftime("%Y%m%d%H%M%S"), make()), "requester": requester, "purpose": purpose,
-            "commercial": commercial, "priority": priority, "needed_by": needed_by, "created_at": stamp.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "commercial": commercial, "priority": priority, "needed_by": needed_by, "created_at": stamp.strftime("%Y-%m-%dT%H:%M:%SZ"), "filed_us": filed_us,
             "state": "queued", "model": model, "positive": positive, "negative": negative, "width": dims["width"], "height": dims["height"],
             "steps": steps, "cfg": cfg, "sampler": spec.get("sampler"), "scheduler": spec.get("scheduler"), "loras": clean_loras, "seeds": list(seeds),
             "destination": dest, "card": spec.get("card"), "notes": notes, "attempts": 0, "error": None, "results": []}
@@ -215,6 +227,7 @@ class JobStore:
         """Validate, check the licence, and write the job into queued/. Returns the stored record. JobError on any problem."""
         for attempt in range(5):
             job = normalize(spec, now=self._clock() if self._clock else None, rand=self._rand)
+            job["filed_us"] = _next_filed_us(job["filed_us"])
             problem = licence_problem(job, self._lookup)
             if problem:
                 raise JobError(problem)
@@ -241,6 +254,8 @@ class JobStore:
         best = None
         for state in STATES:
             rec = _read(self._path(state, jid))
+            if rec is not None:
+                rec.setdefault("filed_us", 0)          # records written before filed_us existed
             if rec is not None and (best is None or _ORDER[state] > _ORDER[best[0]]):
                 best = (state, rec)
         return best
@@ -265,6 +280,7 @@ class JobStore:
                 rec = _read(os.path.join(self._dir(st), name))
                 if rec is None or not isinstance(rec.get("id"), str):
                     continue
+                rec.setdefault("filed_us", 0)          # records written before filed_us existed
                 prior = seen.get(rec["id"])
                 if prior is None or _ORDER[st] > _ORDER[prior[0]]:
                     seen[rec["id"]] = (st, rec)
