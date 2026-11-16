@@ -18,6 +18,7 @@ from core import job_plan  # noqa: E402
 from scripts.slot_fill import headroom  # noqa: E402
 from scripts.slot_fill.engine import good_image  # noqa: E402
 from scripts.slot_fill.pf_client import PFClient  # noqa: E402
+from scripts.jobs.run_steps import read_memory_numbers, step, update_heartbeat  # noqa: E402
 
 ATTEMPTS = 3                 # one try and two retries of the same seed
 FAIL_STOP = 3                # jobs failing in a row that stop the run
@@ -64,6 +65,37 @@ def _live_pid(path):
     return pid
 
 
+def _memory_numbers():
+    try:
+        return read_memory_numbers()
+    except (OSError, KeyError, ValueError):
+        return None
+
+
+def _guard_checker(out):
+    """The headroom check, plus a heartbeat step of 'waiting: memory guard' with the memory numbers whenever it blocks."""
+    def checker(profile="light"):
+        ok, reasons = headroom.check(profile)
+        if not ok:
+            nums = _memory_numbers()
+            update_heartbeat(step="waiting: memory guard", step_since=_iso(time.time()), memory=nums)
+            out("memory guard blocks: %s %s" % (", ".join(reasons), json.dumps(nums)))
+        return ok, reasons
+    return checker
+
+
+def _carried_fields(path):
+    """step, step_since and last_picture_at from the heartbeat already on disk, so a beat() does not erase them."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            old = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(old, dict):
+        return {}
+    return {k: old[k] for k in ("step", "step_since", "last_picture_at") if k in old}
+
+
 def _write_json(path, obj):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = "%s.%d.tmp" % (path, os.getpid())
@@ -93,7 +125,8 @@ def _render(pf, spec, owner):
             except Exception:  # noqa: BLE001 - the retry itself will report the real problem
                 pass
         try:
-            gen = pf.generate(spec)
+            with step("load_model"):
+                gen = pf.generate(spec)
             if not good_image(gen.data):
                 raise ValueError("the picture is blank or tiny")
             return gen, None
@@ -151,8 +184,8 @@ def run(store, pf, *, limit=0, requester=None, priority=None, dry_run=False, own
     code, acquired = 0, False
 
     def beat():
-        _write_json(heartbeat, {"pid": os.getpid(), "at": _iso(now()), "pictures": st["pictures"], "jobs_done": st["jobs_done"],
-                                "jobs_failed": st["jobs_failed"], "current": st["current"]})
+        _write_json(heartbeat, dict(_carried_fields(heartbeat), pid=os.getpid(), at=_iso(now()), pictures=st["pictures"], jobs_done=st["jobs_done"],
+                                    jobs_failed=st["jobs_failed"], current=st["current"]))
 
     try:
         for rec in store.list(state="running"):             # no live runner owns these: an earlier run was interrupted
@@ -180,7 +213,10 @@ def run(store, pf, *, limit=0, requester=None, priority=None, dry_run=False, own
             if why:
                 out(why)
                 break
-            if not wait("light", 1800, 30, sleep, time.monotonic):
+            with step("wait_memory"):
+                out("memory before wait: %s" % json.dumps(_memory_numbers()))
+                headroom_ok = wait("light", 1800, 30, sleep, time.monotonic, checker=_guard_checker(out))
+            if not headroom_ok:
                 out("no headroom for 30 minutes: stopping")
                 code = 2
                 break
@@ -264,13 +300,16 @@ def _run_job(store, pf, job, available, st, owner, deliver, timings_path, now, o
                 pass
         if deliver is not None:
             try:
-                delivered = deliver(rec, seed, gen)
+                with step("copy_destination"):
+                    delivered = deliver(rec, seed, gen)
                 if isinstance(delivered, str) and delivered:
                     row["delivered"] = delivered
             except Exception as exc:  # noqa: BLE001 - the picture exists in the gallery; delivery is reported, never fatal
                 row["delivery_error"] = str(exc)[:200]
         results.append(row)
-        store.set_state(rec["id"], "running", {"results": results})
+        with step("write_result"):
+            store.set_state(rec["id"], "running", {"results": results})
+        update_heartbeat(last_picture_at=_iso(time.time()))
         st["pictures"] += 1
         beat()
         out("%s seed %d ok %ds" % (rec["id"], seed, row["seconds"]))
