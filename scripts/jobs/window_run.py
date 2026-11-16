@@ -20,6 +20,7 @@ import urllib.request
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "server"))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 from core import jobs  # noqa: E402
+from scripts.jobs.run_steps import step  # noqa: E402
 
 DEFAULT_HOURS = 2
 MIN_HOURS, MAX_HOURS = 0.25, 12
@@ -118,19 +119,25 @@ def supervise(store, hours, *, post=None, get=None, run_fn=None, sleep=time.slee
         return 4
     entered = False
     try:
+        out("%s wait start: enter Forge mode" % _iso(now()))
         deadline = now() + ENTER_WAIT
         while now() < deadline:
             c, st = get("/api/pipeline/forge-mode")
             if c == 200 and st.get("paused") and (st.get("gpuSession") or {}).get("active"):
                 entered = True
                 break
-            sleep(5)
+            with step("wait_supervisor"):  # poll-ok: pre-existing bounded Forge-mode wait (ENTER_WAIT 300s), not added here
+                sleep(5)
+        out("%s wait end: enter Forge mode entered=%s" % (_iso(now()), entered))
         if not entered:
             out("Forge mode did not finish switching on within %d seconds" % ENTER_WAIT)
             phase("forge-failed", reasons=["Forge mode did not finish switching on in time"], exit_code=5)
             return 5
         phase("rendering")
+        out("%s runner call start" % _iso(now()))
+        t_run = now()
         rc = run_fn(until=until, stop_file=p["stop"])
+        out("%s runner call end duration_s=%.3f" % (_iso(now()), now() - t_run))
         state["exit_code"] = rc
         return 0 if rc in (0, None) else rc
     except BaseException as exc:  # noqa: BLE001 - the finally below must run for anything, then the error goes on
@@ -140,12 +147,15 @@ def supervise(store, hours, *, post=None, get=None, run_fn=None, sleep=time.slee
         phase("leaving")
         try:
             post("/api/pipeline/forge-mode", {"on": False})
+            out("%s wait start: leave Forge mode" % _iso(now()))
             deadline = now() + LEAVE_WAIT
             while now() < deadline:
                 c, st = get("/api/pipeline/forge-mode")
                 if c == 200 and not st.get("paused"):
                     break
-                sleep(5)
+                with step("wait_supervisor"):  # poll-ok: pre-existing bounded Forge-mode wait (LEAVE_WAIT 180s), not added here
+                    sleep(5)
+            out("%s wait end: leave Forge mode" % _iso(now()))
         except Exception as exc:  # noqa: BLE001
             state["reasons"] = state.get("reasons", []) + ["could not confirm Forge mode is off: %s" % str(exc)[:120]]
         try:
