@@ -26,6 +26,7 @@ from core import loras as loras_mod
 from core import model_importer
 from core import civitai_session
 from core import jobs_routes
+from core.presets_cache import PresetsCache
 
 logger = logging.getLogger(__name__)
 
@@ -222,8 +223,7 @@ def comfy_stop():
 
 # -------------------------------------------------------------------- presets
 
-@app.route("/api/presets")
-def presets():
+def _presets_file_data():
     preset_chars = []
     for name in data.list_characters():
         doc = data.get_character(name)
@@ -233,23 +233,14 @@ def presets():
             # CharacterForge condition ladder (id + label), in worst-last order; [] if none
             "conditions": [{"id": r["id"], "name": r["name"]} for r in doc.get("conditions") or []],
         })
-    # With CharacterForge present it is the single character source (Second Brain notes and
-    # the local presets were imported into it), so the vault list would only duplicate them.
-    cf = cf_characters.configured()
-    sb_chars = [] if cf else [{"source": "secondbrain", "name": n}
-                              for n in secondbrain.list_characters()]
-
     cn = []
     for p in data.list_cn_positions():
         doc = data.get_cn_position(p)
         cn.append({"name": p, "people": doc.get("people", 1),
                    "tags": doc.get("tags", "")})
 
-    models = list_models()
-    return jsonify({
-        "nsfw": data.nsfw_enabled(),
-        "characters": {"preset": preset_chars, "secondbrain": sb_chars},
-        "character_source": "characterforge" if cf else "local",
+    return {
+        "characters": {"preset": preset_chars},
         "styles": data.list_entries("styles"),
         "tones": data.list_entries("tones"),
         "backgrounds": data.list_entries("backgrounds"),
@@ -267,10 +258,46 @@ def presets():
             "species": randomizer.species_choices(),
             "outfit_styles": randomizer.style_choices(),
         },
+        "secondbrain_dir": secondbrain.SB_DIR or None,
+    }
+
+
+# One cache per NSFW state: the nsfw toggle changes data reads without touching any file.
+_PRESETS_CACHES = {}
+
+
+def _presets_sources():
+    """Every file and directory under DATA_DIR at first use. Stat-only signature; a change to
+    any listed file or directory invalidates the cache. Files in directories created after
+    startup are not tracked; their parent directory's mtime still changes."""
+    paths = []
+    for root, _dirs, files in os.walk(data.DATA_DIR):
+        paths.append(root)
+        paths.extend(os.path.join(root, f) for f in files)
+    return paths
+
+
+@app.route("/api/presets")
+def presets():
+    nsfw = bool(data.nsfw_enabled())
+    cache = _PRESETS_CACHES.get(nsfw)
+    if cache is None:
+        cache = _PRESETS_CACHES[nsfw] = PresetsCache(_presets_sources(), _presets_file_data)
+    file_data = dict(cache.get())  # fresh top-level dict so callers cannot mutate the cached one
+    # Live, never cached: the CharacterForge config and the Second Brain vault (SECOND_BRAIN_DIR is
+    # outside DATA_DIR, so its changes are not signed) and the ComfyUI model lists.
+    cf = cf_characters.configured()
+    sb_chars = [] if cf else [{"source": "secondbrain", "name": n}
+                              for n in secondbrain.list_characters()]
+    file_data["characters"] = {**file_data["characters"], "secondbrain": sb_chars}
+    models = list_models()
+    file_data.update({
+        "character_source": "characterforge" if cf else "local",
+        "nsfw": nsfw,
         "checkpoints": models,
         "checkpoint_licenses": {m: licenses.lookup(m) for m in models},
-        "secondbrain_dir": secondbrain.SB_DIR or None,
     })
+    return jsonify(file_data)
 
 
 @app.route("/api/nsfw", methods=["GET", "POST"])
