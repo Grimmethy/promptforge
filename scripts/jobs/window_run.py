@@ -130,7 +130,9 @@ def supervise(store, hours, *, post=None, get=None, run_fn=None, sleep=time.slee
             phase("forge-failed", reasons=["Forge mode did not finish switching on in time"], exit_code=5)
             return 5
         phase("rendering")
-        rc = run_fn(until=until, stop_file=p["stop"])
+        run_reasons = []
+        rc = run_fn(until=until, stop_file=p["stop"], reasons=run_reasons)
+        state["reasons"] = run_reasons + state.get("reasons", [])
         state["exit_code"] = rc
         return 0 if rc in (0, None) else rc
     except BaseException as exc:  # noqa: BLE001 - the finally below must run for anything, then the error goes on

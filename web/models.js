@@ -8,6 +8,8 @@
     if (!n || !Number.isFinite(Number(n))) return 'unknown';
     return Number(n) >= GB ? (Number(n) / GB).toFixed(1) + ' GB' : Math.round(Number(n) / MB) + ' MB';
   };
+  // binary GB (1024^3) with one decimal, for the oversize refusal message: gbText(6442450944) is '6.0 GB'
+  const gbText = bytes => (Number(bytes) / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
   // does this registry entry fit the selected model's base? (an unknown base on either side never hides a LoRA)
   const fits = (lora, base) => !base || !lora.base || lora.base === base;
   // the base the registry lists for a checkpoint file, else null
@@ -60,7 +62,7 @@
   const keyWarningShown = (plan, configured) => configured === false && Array.isArray(plan && plan.warnings) && plan.warnings.includes(KEY_WARNING);
   // the Civitai API key status line for the Models panel
   const keyStatusText = configured => (configured === true ? 'Civitai API key: configured' : 'Civitai API key: not set');
-  const api = { sessionLine, fits, baseOf, available, newRow, toSpec, notForSale, sellWarning, planRows, canImport, progressText, weightOf, formatSize, keyWarningShown, keyStatusText };
+  const api = { sessionLine, fits, baseOf, available, newRow, toSpec, notForSale, sellWarning, planRows, canImport, progressText, weightOf, formatSize, gbText, keyWarningShown, keyStatusText };
   root.PFModels = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
