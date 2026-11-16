@@ -763,6 +763,9 @@ def models_plan():
         plan = model_importer.fetch_plan(str(b.get("url") or ""), IMPORT_IO["fetcher"], key, type_override=b.get("type") or None)
     except model_importer.ImportError_ as e:
         return jsonify({"error": model_importer._scrub(e, key)}), 400
+    if "error" in plan:
+        # an oversize refusal: the plan fields sit beside the error, with 422
+        return jsonify(plan), 422
     return jsonify(plan)
 
 
