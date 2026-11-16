@@ -384,8 +384,26 @@ function renderRunControls(est, run) {
   };
 }
 
+// Pure: the visible row label. The shared prefix is stripped so the distinguishing part comes first and survives truncation.
+function queueRowLabel(job, sharedPrefix) {
+  const purpose = job.purpose || '';
+  const rest = (sharedPrefix && purpose.startsWith(sharedPrefix) ? purpose.slice(sharedPrefix.length) : purpose)
+    .replace(/^[\s:\-\u2013,]+/, '').trim();
+  return rest || purpose || job.id;
+}
+
+// The longest common prefix of the jobs' purpose strings ('' when there are none).
+function commonPurposePrefix(jobs) {
+  const purposes = (jobs || []).map(j => j.purpose || '');
+  if (!purposes.length) return '';
+  let p = purposes[0];
+  for (const s of purposes) { while (!s.startsWith(p)) p = p.slice(0, -1); }
+  return p;
+}
+
 function renderQueuePanel(panel, jobs, perJob) {
   panel.replaceChildren();
+  const sharedPrefix = commonPurposePrefix(jobs);
   const act = async (id, what, body) => {
     const r = await fetch('/api/jobs/' + id + '/' + what, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })
       .then(r => r.json()).catch(() => ({ error: 'the server did not answer' }));
@@ -397,8 +415,11 @@ function renderQueuePanel(panel, jobs, perJob) {
     for (const j of g.jobs) {
       const row = PFQueue.jobRow(j, perJob);
       const line = el('div', { class: 'qrow' });
-      line.append(el('span', { class: 'qtext', title: row.id }, (row.purpose || row.id) + ' · ' + row.model + ' · ' + row.seeds + ' seeds'
-        + (row.seconds != null ? ' · ~' + PFQueue.formatDuration(row.seconds) : '') + (row.state === 'held' ? ' · held' : '')));
+      const prompt = j.positive || '';
+      const fullPurpose = row.purpose || row.id;
+      const secs = perJob && perJob[j.id] != null ? Math.round(perJob[j.id]) : null;
+      line.append(el('span', { class: 'qtext', title: fullPurpose + (prompt ? ' — ' + prompt.slice(0, 80) : '') }, queueRowLabel(j, sharedPrefix) + ' · ' + row.model + ' · ' + row.seeds + ' seeds'
+        + (secs != null ? ' · ~' + secs + ' s' : '') + (row.state === 'held' ? ' · held' : '')));
       if (row.canHold) {
         const sel = el('select', { title: 'priority' });
         for (const p of ['urgent', 'normal', 'bulk']) sel.append(el('option', { value: p }, p));
