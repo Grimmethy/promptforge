@@ -283,11 +283,20 @@ def licence_verdict(flags):
     return verdict, "Civitai creator permissions: %s" % (", ".join(flags) or "none")
 
 
-def _check_file(name, size, max_bytes):
+def _gb_text(n_bytes):
+    """Binary gigabytes (1024^3 bytes) with one decimal place, labelled GB: 1.5 GB."""
+    return "%.1f GB" % (n_bytes / 1024 ** 3)
+
+
+class OversizeError(ImportError_):
+    """A file over its type's size cap. The plan turns it into a refusal it can show; everything else still raises."""
+
+
+def _check_file(name, size, max_bytes, mtype=None):
     if not str(name).lower().endswith(".safetensors"):
         raise ImportError_("only .safetensors files are accepted (not %s)" % (os.path.splitext(str(name))[1] or "this file type"))
     if size and size > max_bytes:
-        raise ImportError_("the file is %d bytes, over the %d byte limit" % (size, max_bytes))
+        raise OversizeError("%s, over the %s limit for %ss" % (_gb_text(size), _gb_text(max_bytes), str(mtype or "model").lower()))
 
 
 def fetch_plan(link, fetcher=None, key=None, models_dir=None, max_bytes=None, type_override=None, head=None):
@@ -306,6 +315,8 @@ def fetch_plan(link, fetcher=None, key=None, models_dir=None, max_bytes=None, ty
         raise
     except (urllib.error.URLError, OSError, ValueError, KeyError, TypeError) as e:
         raise ImportError_("could not read the model information: %s" % _scrub(e, key))
+    if "error" in plan:
+        return plan
     folder = TYPE_DIRS.get(str(plan["type"]).lower())
     if not folder:
         raise ImportError_("cannot place a %s model yet (loras, checkpoints and embeddings only)" % plan["type"])
@@ -324,6 +335,12 @@ def fetch_plan(link, fetcher=None, key=None, models_dir=None, max_bytes=None, ty
     return plan
 
 
+def _oversize_refusal(name, mtype, base_model, file_name, size, error, licence):
+    """The plan returned for a file over its size cap: the fields the page shows, the size in bytes and the refusal text (no folder, no destination)."""
+    return {"name": name, "type": mtype, "base_model": base_model, "licence": licence,
+            "file": {"name": os.path.basename(str(file_name)), "size": int(size)}, "error": error}
+
+
 def _plan_civitai(spec, fetch, key, max_bytes, type_override):
     model = json.loads(fetch("https://civitai.com/api/v1/models/%d" % spec["model_id"], _headers(key)))
     if not isinstance(model, dict):
@@ -340,7 +357,12 @@ def _plan_civitai(spec, fetch, key, max_bytes, type_override):
     f = next((x for x in files if x.get("primary")), files[0])
     size = int(round(float(f.get("sizeKB") or 0) * 1024))
     mtype = type_override or model.get("type")
-    _check_file(f["name"], size, max_bytes if max_bytes is not None else max_bytes_for(mtype))
+    try:
+        _check_file(f["name"], size, max_bytes if max_bytes is not None else max_bytes_for(mtype), mtype)
+    except OversizeError as e:
+        verdict, text = licence_verdict(_flags(model.get("allowCommercialUse")))
+        return _oversize_refusal(model.get("name"), mtype, ver.get("baseModel"), f["name"], size, str(e),
+                                 {"commercial_use": verdict, "text": text, "source_url": "https://civitai.com/models/%s" % model.get("id", spec["model_id"])})
     flags = _flags(model.get("allowCommercialUse"))
     verdict, text = licence_verdict(flags)
     return {"site": "civitai", "model_id": model.get("id", spec["model_id"]), "version_id": ver.get("id"),
@@ -366,7 +388,12 @@ def _plan_hf(spec, fetch, max_bytes, type_override):
     if entry is None:
         raise ImportError_("that file is not in the repository")
     size = int(entry.get("size") or 0)
-    _check_file(spec["path"], size, cap)
+    try:
+        _check_file(spec["path"], size, cap, type_override)
+    except OversizeError as e:
+        return _oversize_refusal(os.path.splitext(os.path.basename(spec["path"]))[0], type_override, None, spec["path"], size, str(e),
+                                 {"commercial_use": "unverified", "text": "Hugging Face file: licence not read, check the repository",
+                                  "source_url": "https://huggingface.co/%s" % spec["repo"]})
     name = os.path.basename(spec["path"])
     return {"site": "huggingface", "model_id": spec["repo"], "version_id": spec["rev"], "name": os.path.splitext(name)[0], "type": type_override,
             "base_model": None, "base": None, "trained_words": [],

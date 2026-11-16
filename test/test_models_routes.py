@@ -124,6 +124,21 @@ class PlanRouteTest(Base):
         self.assertEqual(self.post("/api/models/plan", url=link, type="lora").status_code, 200)
 
 
+    def test_plan_oversize_refused_returns_422_with_plan_fields(self):
+        big = json.loads(json.dumps(self.api))
+        big["modelVersions"][0]["files"][0]["sizeKB"] = 7 * 1024 * 1024      # 7 GiB, over the 6 GiB LoRA cap (sizeKB is kilobytes)
+        pf.IMPORT_IO["fetcher"] = fetcher_for(big)
+        r = self.post("/api/models/plan", url=LINK)
+        self.assertTrue(400 <= r.status_code < 500, r.status_code)
+        p = r.get_json()
+        self.assertIn("GB", p["error"])
+        for key in ("name", "type", "base_model", "licence", "file"):
+            self.assertIn(key, p)
+        self.assertIn("name", p["file"])
+        self.assertIn("size", p["file"])
+        self.assertFalse(os.path.exists(self.models))
+
+
 class ImportRouteTest(Base):
     def test_confirm_must_be_the_boolean_true(self):
         for confirm in (None, False, "true", 1, "yes", [True]):
