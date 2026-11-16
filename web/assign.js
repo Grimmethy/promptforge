@@ -156,6 +156,63 @@ function buildAssignPanel(opts) {
   return panel;
 }
 
-const api = { preselectEntries, badgeLabel, buildAssignPanel };
+// Link-list renderer: one row per sidecar link (forge, slug, role, tag, note, verdict, ts). Hidden when there are no links.
+function renderLinkList(doc, host, links) {
+  host.textContent = '';
+  const list = Array.isArray(links) ? links : [];
+  host.hidden = !list.length;
+  for (const l of list) {
+    host.appendChild(el(doc, 'div', { className: 'assign-link' }, [
+      el(doc, 'span', { text: `${l.forge || ''} ${l.slug || ''} . ${l.role || ''}` }),
+      el(doc, 'span', { text: l.tag ? ` tag:${l.tag}` : '' }),
+      el(doc, 'span', { text: l.note ? ` note:${l.note}` : '' }),
+      el(doc, 'span', { text: l.verdict ? ` verdict:${l.verdict}` : '' }),
+      el(doc, 'span', { text: l.ts ? ` ${l.ts}` : '' }),
+    ]));
+  }
+  return host;
+}
+
+// GET /api/link-targets, one call per invocation. Error entries are kept and tagged with a '<forge> unreachable' message.
+async function fetchLinkTargets(fetchFn = (...a) => fetch(...a)) {
+  const res = await fetchFn('/api/link-targets');
+  const data = await res.json().catch(() => ({}));
+  const list = Array.isArray(data) ? data : (data && data.targets) || [];
+  return list.map((t) => (t && t.error ? { ...t, unreachable: true, message: `${t.forge || t.label || 'target'} unreachable` } : t));
+}
+
+// Set of forge names whose target is unreachable (error entry).
+function unreachableForges(targets) {
+  return new Set((targets || []).filter((t) => t && t.error).map((t) => t.forge));
+}
+
+// Renders a disabled '<forge> unreachable' line per error entry. Returns the forges it disabled.
+function renderUnreachable(doc, host, targets) {
+  const bad = (targets || []).filter((t) => t && t.error);
+  for (const t of bad) {
+    host.appendChild(el(doc, 'div', { className: 'assign-unreachable', text: `${t.forge || t.label || 'target'} unreachable` }));
+  }
+  return bad.map((t) => t.forge);
+}
+
+// POST /api/gallery/<relpath>/assign. Targets on an unreachable forge are never sent; they come back as local error results.
+async function sendAssign(fetchFn, relpath, body, unreachable = new Set()) {
+  const all = (body && body.targets) || [];
+  const blocked = all.filter((t) => t && unreachable.has(t.forge));
+  const allowed = all.filter((t) => !(t && unreachable.has(t.forge)));
+  const blockedResults = blocked.map((t) => ({ slug: t.slug, role: t.role, ok: false, error: `${t.forge} unreachable` }));
+  if (!allowed.length) return blockedResults;
+  const url = `/api/gallery/${String(relpath).split('/').map(encodeURIComponent).join('/')}/assign`;
+  const res = await fetchFn(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, targets: allowed }) });
+  const data = await res.json().catch(() => ({}));
+  let results;
+  if (Array.isArray(data)) results = data;
+  else if (Array.isArray(data.results)) results = data.results;
+  else if (Array.isArray(data.targets)) results = data.targets;
+  else results = [{ slug: '', role: body.role || '', ok: false, error: data.error || `HTTP ${res.status}`, status: res.status }];
+  return [...blockedResults, ...results];
+}
+
+const api = { preselectEntries, badgeLabel, buildAssignPanel, renderLinkList, fetchLinkTargets, unreachableForges, renderUnreachable, sendAssign };
 if (typeof window !== 'undefined') window.PFAssignPanel = api;
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
