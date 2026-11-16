@@ -138,6 +138,26 @@ class SessionRoutesTest(Base):
             for bad in ("cookie", "password"):
                 self.assertNotIn(bad, resp.get_data(as_text=True).lower())
 
+    def test_a_sign_in_window_that_exits_at_once_answers_503(self):
+        class Dead:
+            returncode = 1
+
+            def poll(self):
+                return 1
+
+            def wait(self, timeout=None):
+                return 1
+
+        pf.IMPORT_IO["login"] = None
+        cs._login[0] = None
+        self.addCleanup(lambda: cs._login.__setitem__(0, None))
+        with mock.patch.object(cs, "session_python", return_value="/fake/bin/python"), \
+                mock.patch.object(cs, "port_busy", return_value=False), \
+                mock.patch.object(cs.subprocess, "Popen", return_value=Dead()):
+            r = self.c.post("/api/models/session/login")
+        self.assertEqual(r.status_code, 503)
+        self.assertIsNone(cs._login[0])
+
     def test_login_refused_while_an_import_runs_and_when_unavailable(self):
         pf.IMPORT_IO["login"] = lambda: self.fail("opened a window during an import")
         pf._import_running[0] = "job"

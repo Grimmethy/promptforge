@@ -100,11 +100,17 @@ class DownloadTest(Base):
 
 class LoginTest(Base):
     class Proc:
-        def __init__(self, alive=True):
+        def __init__(self, alive=True, rc=0):
             self.alive = alive
+            self.returncode = None if alive else rc
 
         def poll(self):
-            return None if self.alive else 0
+            return self.returncode
+
+        def wait(self, timeout=None):
+            if self.alive:
+                raise subprocess.TimeoutExpired("fake", timeout)
+            return self.returncode
 
     def test_starts_a_detached_login_and_refuses_a_second(self):
         made = []
@@ -114,7 +120,8 @@ class LoginTest(Base):
             return self.Proc()
         cs.start_login(popen)
         argv, kw = made[0]
-        self.assertEqual(argv[1:3], ["-m", "site_sessions.cli"])
+        self.assertEqual(argv[1], "-c")
+        self.assertIn("site_sessions.cli", argv[2])
         self.assertEqual(argv[-2:], ["login", "civitai"])
         self.assertTrue(kw["start_new_session"])
         with self.assertRaises(cs.SessionError) as cm:
@@ -127,6 +134,29 @@ class LoginTest(Base):
         made = []
         cs.start_login(lambda argv, **kw: made.append(1) or self.Proc())
         self.assertEqual(made, [1])
+
+    def test_a_sibling_console_script_is_used_when_present(self):
+        script = os.path.join(self.tmp.name, "site-sessions")
+        open(script, "w").close()
+        os.chmod(script, 0o755)
+        made = []
+
+        def popen(argv, **kw):
+            made.append(argv)
+            return self.Proc()
+        cs.start_login(popen)
+        self.assertEqual(made[0][0], script)
+        self.assertEqual(made[0][-2:], ["login", "civitai"])
+
+    def test_a_child_that_exits_with_an_error_at_once_is_unavailable(self):
+        with self.assertRaises(cs.SessionError) as cm:
+            cs.start_login(lambda argv, **kw: self.Proc(alive=False, rc=1), wait=0.01)
+        self.assertEqual(cm.exception.kind, "unavailable")
+        self.assertIsNone(cs._login[0])
+
+    def test_a_child_still_running_after_the_wait_is_accepted(self):
+        cs.start_login(lambda argv, **kw: self.Proc(), wait=0.01)
+        self.assertIsNotNone(cs._login[0])
 
     def test_busy_port_refuses(self):
         with mock.patch.object(cs, "port_busy", return_value=True):
