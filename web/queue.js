@@ -1,9 +1,13 @@
-/* PromptForge Studio: the render job queue in the header. Pure functions only (no DOM, no fetch, no timers), loaded before app.js; node can load it too
+/* PromptForge Studio: the render job queue in the header. Pure functions only (no DOM, no network, no timers), loaded before app.js; node can load it too
    (module.exports) for the unit tests. The wiring lives in app.js (queueStatus). */
 (function (root) {
   // Same wording as scripts/jobs/runner.py format_seconds.
   const formatDuration = (seconds) => {
-    const n = Math.round(Number(seconds) || 0);
+    // Python round(): halves go to the even neighbour (2.5 -> 2, 3.5 -> 4).
+    const x = Number(seconds) || 0;
+    const f = Math.floor(x);
+    const diff = x - f;
+    const n = diff > 0.5 ? f + 1 : diff < 0.5 ? f : (f % 2 === 0 ? f : f + 1);
     if (n < 60) return n + 's';
     if (n < 3600) return Math.floor(n / 60) + 'm';
     const m = Math.floor((n % 3600) / 60);

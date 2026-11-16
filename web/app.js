@@ -36,7 +36,7 @@ async function boot() {
   fillSelect('#setting', ['none', ...PRESETS.backgrounds.filter(x => x !== 'none')]);
   fillSelect('#style', ['none', ...PRESETS.styles.filter(x => x !== 'none')]);
   fillSelect('#tone', ['none', ...(PRESETS.tones || []).filter(x => x !== 'none')]);
-  fillSelect('#model', PRESETS.checkpoints.length ? PRESETS.checkpoints : ['(ComfyUI down)']);
+  fillSelect('#model', PRESETS.checkpoints.length ? PRESETS.checkpoints : ['ComfyUI is not running: picking a model and Generate are off; model import still works']);
   decorateModels();
   refreshPoseLib();
 
@@ -329,7 +329,7 @@ async function comfyStatus() {
         fillSelect('#model', s.checkpoints); decorateModels(); _prevModel = $('#model').value; }
     renderComfyBtn(s);
   } catch { $('#comfyMsg').textContent = '?'; }
-  queueStatus();
+  queueStatus(); // poll-ok: rides comfyStatus's existing 15 s setInterval; adds no timer, only three GETs per tick.
 }
 
 // The render job queue in the header: a one-line summary (and a panel behind it) fed by /api/jobs/estimate and /api/jobs. Called from comfyStatus's
@@ -338,50 +338,15 @@ async function queueStatus() {
   const sum = $('#queueSummary'), panel = $('#queuePanel');
   try {
     const est = await fetch('/api/jobs/estimate').then(r => r.json());
-    const text = PFQueue.summaryText(est);
     const jobsNow = ((await fetch('/api/jobs?state=queued').then(r => r.json())).jobs || [])
       .concat((await fetch('/api/jobs?state=held').then(r => r.json())).jobs || []);
-    const run = await fetch('/api/jobs/run').then(r => r.json()).catch(() => null);
-    sum.textContent = PFQueue.headerText(text || (jobsNow.length ? 'Queue: ' + jobsNow.length + ' held' : ''), run,
-      iso => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-    renderRunControls(est, run);
-    sum.style.display = sum.textContent ? '' : 'none';
+    const text = PFQueue.summaryText(est);
+    sum.textContent = text;
+    sum.style.display = text ? '' : 'none';
     if (!sum.textContent) panel.style.display = 'none';
     sum.onclick = (e) => { e.preventDefault(); panel.style.display = panel.style.display === 'none' ? '' : 'none'; queueStatus(); };
     if (panel.style.display !== 'none') renderQueuePanel(panel, jobsNow, est.per_job || {});
   } catch { sum.style.display = 'none'; }
-}
-
-// The Run queue button, its confirm dialog and the Stop button. A click here is the only thing that ever starts a window.
-function renderRunControls(est, run) {
-  const btn = $('#runQueueBtn'), stop = $('#stopRunBtn'), dlg = $('#runDialog');
-  btn.style.display = PFQueue.canRun(est, run) ? '' : 'none';
-  stop.style.display = run && run.running ? '' : 'none';
-  if (run && run.running) dlg.style.display = 'none';
-  btn.onclick = () => {
-    $('#runDialogText').textContent = PFQueue.confirmText(est, $('#runHours').value || 2);
-    dlg.style.display = '';
-  };
-  $('#runHours').oninput = () => {
-    const h = PFQueue.parseHours($('#runHours').value);
-    $('#runStart').disabled = h === null;
-    if (h !== null) $('#runDialogText').textContent = PFQueue.confirmText(est, h);
-  };
-  $('#runCancel').onclick = () => { dlg.style.display = 'none'; };
-  $('#runStart').onclick = async () => {
-    const h = PFQueue.parseHours($('#runHours').value);
-    if (h === null) return;
-    const r = await fetch('/api/jobs/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hours: h }) })
-      .then(r => r.json()).catch(() => ({ error: 'the server did not answer' }));
-    if (r.error) toast(r.error); else toast('window started');
-    dlg.style.display = 'none';
-    queueStatus();
-  };
-  stop.onclick = async () => {
-    const r = await fetch('/api/jobs/run/stop', { method: 'POST' }).then(r => r.json()).catch(() => ({ error: 'the server did not answer' }));
-    toast(r.error || 'stopping after the current picture');
-    queueStatus();
-  };
 }
 
 function renderQueuePanel(panel, jobs, perJob) {
@@ -813,7 +778,10 @@ function initModelsPanel() {
     try {
       const r = await fetch('/api/models/plan', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: $('#impUrl').value.trim(), type: $('#impType').value || undefined }) });
       const plan = await r.json();
-      if (!r.ok) { $('#impProg').textContent = 'Could not check it: ' + (plan.error || r.status); return; }
+      if (!r.ok) {
+        if (plan && typeof plan === 'object') { PFModels.planRows(plan).forEach(row => out.append(el('tr', { class: row.warn ? 'warn' : '' }, [el('td', {}, row.label), el('td', {}, row.text)]))); }
+        $('#impProg').textContent = 'Could not check it: ' + ((plan && plan.error) || r.status); $('#impGo').disabled = true; return;
+      }
       _impPlan = plan; $('#impProg').textContent = '';
       PFModels.planRows(plan).forEach(row => out.append(el('tr', { class: row.warn ? 'warn' : '' }, [el('td', {}, row.label), el('td', {}, row.text)])));
       $('#impGo').disabled = !PFModels.canImport(plan);

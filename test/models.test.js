@@ -55,6 +55,20 @@ test('planRows shows what will be installed and flags the warnings', () => {
   assert.strictEqual(M.planRows({ file: {}, licence: {} }).find(r => r.label === 'Size').text, 'unknown');
 });
 
+test('planRows still lists Name and Size for a partial plan that carries an error', () => {
+  const plan = { name: 'N', type: 'LORA', base_model: 'Illustrious', licence: { commercial_use: 'no' },
+    file: { name: 'f.safetensors', size: 1234 }, error: 'could not read the full plan' };
+  const rows = M.planRows(plan);
+  assert.ok(rows.find(r => r.label === 'Name'));
+  assert.ok(rows.find(r => r.label === 'Size'));
+});
+
+test('gbText uses binary GB (1024^3) with one decimal', () => {
+  assert.strictEqual(M.gbText(6442450944), '6.0 GB');
+  assert.strictEqual(M.gbText(6938504356), '6.5 GB');
+  assert.strictEqual(M.gbText(0), '0.0 GB');
+});
+
 test('formatSize uses decimal GB from 1 GB up and whole MB below, and unknown for no size', () => {
   assert.strictEqual(M.formatSize(6938504356), '6.9 GB');
   assert.strictEqual(M.formatSize(228467712), '228 MB');
