@@ -121,7 +121,7 @@ def _parse_until(until):
 
 
 def run(store, pf, *, limit=0, requester=None, priority=None, dry_run=False, owner="job-queue", deliver=None, timings_path=None, sleep=time.sleep,
-        now=time.time, wait=headroom.wait, out=print, until=None, stop_file=None):
+        now=time.time, wait=headroom.wait, out=print, until=None, stop_file=None, reasons=None):
     try:
         until_ts = _parse_until(until)
     except (ValueError, TypeError):
@@ -161,7 +161,10 @@ def run(store, pf, *, limit=0, requester=None, priority=None, dry_run=False, own
             pf.gpu_acquire(owner)
             acquired = True
         except Exception as exc:  # noqa: BLE001
-            out("could not take the GPU session: %s" % exc)
+            reason = str(exc)[:300] or exc.__class__.__name__
+            out("could not take the GPU session: %s" % reason)
+            if reasons is not None:
+                reasons.append("could not take the GPU session: %s" % reason)
             return 1
         try:
             available = set(pf.models() or [])

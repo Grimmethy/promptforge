@@ -1,6 +1,7 @@
 """A small PromptForge client for the engine: generate one picture, take and release the GPU session. Standard library only."""
 import json
 import os
+import socket
 import time
 import urllib.error
 import urllib.parse
@@ -11,6 +12,31 @@ from .errors import SlotFillError
 
 Generated = namedtuple("Generated", "job name data")
 POLL_S = 2.0
+# Blocking wait for POST /api/gpu/acquire. The server's own start budget, summed: the server's begin() may wait for the
+# pipeline lock, then for the eviction, then for a ComfyUI cold start, and it reports the failure only at the end.
+#   COMFY_START_TIMEOUT_S 300  (server/core/comfy_proc.py:63)
+#   LOCK_WAIT_S            90   (server/core/gpu_session.py:47)
+#   EVICT_WAIT_S           45   (server/core/gpu_session.py:48)
+#   margin                 60
+# If the server's FORGE_LOCK_WAIT_S / FORGE_EVICT_WAIT_S / COMFY_START_TIMEOUT_S env overrides are raised, raise this too.
+GPU_ACQUIRE_WAIT_S = 495
+
+
+def _server_reason(err):
+    """The server's own reason from an HTTP error body: its JSON 'reason' or 'error' field, else the raw text (cut to 300 chars)."""
+    try:
+        raw = err.read().decode("utf-8", "replace").strip()
+    except Exception:  # noqa: BLE001 - no body means no reason
+        return ""
+    try:
+        body = json.loads(raw)
+    except ValueError:
+        return raw[:300]
+    if isinstance(body, dict):
+        for key in ("reason", "error"):
+            if body.get(key):
+                return str(body[key])[:300]
+    return raw[:300]
 
 
 class PFClient:
@@ -26,9 +52,13 @@ class PFClient:
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 out = r.read()
         except urllib.error.HTTPError as e:
-            raise SlotFillError("PromptForge %s answered %s" % (path, e.code))
+            reason = _server_reason(e)
+            raise SlotFillError("PromptForge %s answered %s%s" % (path, e.code, (": " + reason) if reason else ""))
         except (urllib.error.URLError, OSError) as e:
-            raise SlotFillError("PromptForge not reachable at %s (%s)" % (self.base, getattr(e, "reason", e)))
+            reason = getattr(e, "reason", e)
+            if isinstance(reason, (socket.timeout, TimeoutError)) or isinstance(e, (socket.timeout, TimeoutError)):
+                raise SlotFillError("PromptForge %s timed out waiting (%ss)" % (path, timeout))
+            raise SlotFillError("PromptForge not reachable at %s (%s)" % (self.base, reason))
         if raw:
             return out
         try:
@@ -59,7 +89,7 @@ class PFClient:
         return Generated(s, name, data)
 
     def gpu_acquire(self, owner):
-        return self._call("/api/gpu/acquire", {"owner": owner}, timeout=180)
+        return self._call("/api/gpu/acquire", {"owner": owner}, timeout=GPU_ACQUIRE_WAIT_S)
 
     def gpu_release(self):
         return self._call("/api/gpu/release", {})
