@@ -36,7 +36,7 @@ async function boot() {
   fillSelect('#setting', ['none', ...PRESETS.backgrounds.filter(x => x !== 'none')]);
   fillSelect('#style', ['none', ...PRESETS.styles.filter(x => x !== 'none')]);
   fillSelect('#tone', ['none', ...(PRESETS.tones || []).filter(x => x !== 'none')]);
-  fillSelect('#model', PRESETS.checkpoints.length ? PRESETS.checkpoints : ['(ComfyUI down)']);
+  fillSelect('#model', PRESETS.checkpoints.length ? PRESETS.checkpoints : ['ComfyUI is not running: picking a model and Generate are off; model import still works']);
   decorateModels();
   refreshPoseLib();
 
