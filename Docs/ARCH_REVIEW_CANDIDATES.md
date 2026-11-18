@@ -119,3 +119,30 @@ Collapse to a single public function — either keep `get_theme` with the defaul
 
 Benefits:
 Callers learn one name for one operation. The default behavior is documented in one place, eliminating the risk of the two functions drifting apart. Code review and maintenance become simpler since there is no longer a hidden alias to track.
+
+### AC-12 · Corrected Assessment
+Strength: Strong
+
+**Status:** Original draft withdrawn — the flagged issue does not exist.
+
+**Reasoning:**
+
+The original draft mischaracterized two separate, correctly-separated data loading systems as "duplicates." The critique correctly identifies that:
+
+1. `secondbrain.get_character()` loads from markdown notes (`$SECOND_BRAIN_DIR/Characters/*.md`)
+2. `data.get_character()` loads from YAML preset files (`data/characters/<name>.yaml`)
+
+These are **different data sources** with different formats, schemas, and use cases. They are not duplicates — they are separate implementations for separate concerns.
+
+**Why consolidation would be wrong:**
+
+- YAML presets and markdown notes are fundamentally incompatible data formats
+- Merging them into one function would create a monolithic loader handling two unrelated schemas
+- The current separation is architecturally correct — each module owns its data source
+- The comment in `assemble.py` about "secondbrain is architecturally identical to custom" refers to source type handling within `assemble.py`, not the loading mechanism itself
+
+**Conclusion:**
+
+No code changes needed. The two loaders serve different purposes and should remain separate. The original AC-004 draft was based on a false premise.
+
+NOTE: The critique's conclusion that "NO ISSUES FOUND" applies to the code itself — the original draft's assessment was incorrect, not the implementation.
