@@ -15,7 +15,7 @@ from core import gpu_session as gs  # noqa: E402
 from test_gpu_session import Base  # noqa: E402
 
 P40 = "http://192.168.122.29:11434"
-RX580 = "http://100.96.112.78:11434"
+RX580 = "http://100.64.0.2:11434"
 
 
 class LeaseEndpointsTest(Base):

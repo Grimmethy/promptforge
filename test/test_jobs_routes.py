@@ -11,7 +11,7 @@ from flask import Flask  # noqa: E402
 from core import jobs, jobs_routes  # noqa: E402
 
 LOCAL = {"REMOTE_ADDR": "127.0.0.1"}
-REMOTE = {"REMOTE_ADDR": "100.80.1.14"}
+REMOTE = {"REMOTE_ADDR": "100.64.0.1"}
 
 
 def spec(**kw):
@@ -68,7 +68,7 @@ class AddTest(RoutesBase):
         r = self.post("/api/jobs", spec(), env=REMOTE)
         self.assertEqual(r.status_code, 403)
         self.assertEqual(r.get_json()["error"], "jobs can only be filed from this machine")
-        r = self.client.post("/api/jobs", json=spec(), environ_overrides=LOCAL, headers={"X-Forwarded-For": "100.80.1.14"})
+        r = self.client.post("/api/jobs", json=spec(), environ_overrides=LOCAL, headers={"X-Forwarded-For": "100.64.0.1"})
         self.assertEqual(r.status_code, 403)
         for header in ("Forwarded", "X-Real-IP"):
             r = self.client.post("/api/jobs", json=spec(), environ_overrides=LOCAL, headers={header: "x"})

@@ -76,7 +76,7 @@ class StartTest(RunBase):
     def test_only_this_machine_may_start_or_stop(self):
         self.file_job()
         self.assertEqual(self.post("/api/jobs/run", {"hours": 2}, env=REMOTE).status_code, 403)
-        r = self.client.post("/api/jobs/run", json={"hours": 2}, environ_overrides=LOCAL, headers={"X-Forwarded-For": "100.80.1.14"})
+        r = self.client.post("/api/jobs/run", json={"hours": 2}, environ_overrides=LOCAL, headers={"X-Forwarded-For": "100.64.0.1"})
         self.assertEqual(r.status_code, 403)
         self.write("window-run.json", {"pid": os.getpid(), "phase": "rendering"})
         self.assertEqual(self.post("/api/jobs/run/stop", env=REMOTE).status_code, 403)
