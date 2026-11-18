@@ -146,3 +146,48 @@ These are **different data sources** with different formats, schemas, and use ca
 No code changes needed. The two loaders serve different purposes and should remain separate. The original AC-004 draft was based on a false premise.
 
 NOTE: The critique's conclusion that "NO ISSUES FOUND" applies to the code itself — the original draft's assessment was incorrect, not the implementation.
+
+### AC-13 · Tight coupling between `secondbrain.py` and `data` for character resolution
+Strength: Strong
+Files: server/core/secondbrain.py, server/core/data.py, server/core/assemble.py
+
+Problem:
+`secondbrain.py` provides `get_character()` which returns `{"name": ..., "base": ...}`, but `assemble.py`'s `character_segment()` expects a character dict with keys like `source`, `name`, `outfit`, `expression`, `weight`, `text`, and `condition`. When `source == "secondbrain"`, the caller must manually construct a character dict with the resolved `text` field and pass it through the same `character_segment()` path as presets. This creates an architectural inconsistency: secondbrain characters are architecturally identical to custom characters (as noted in the comment), but they flow through a different resolution path that bypasses the unified `data.get_character()` interface. The secondbrain integration is a thin wrapper that doesn't leverage the shared character resolution logic, creating a parallel code path that must be maintained separately.
+
+Solution:
+Refactor so that secondbrain characters go through the same `data.get_character()` path as presets, with a unified `source` resolution in `data` that handles both YAML and markdown sources. This eliminates the parallel code path and ensures both sources use the same resolution logic.
+
+Benefits:
+Eliminates the architectural split between secondbrain and preset character resolution. Future changes to character processing only need to happen in one place. The secondbrain integration becomes a transparent data source rather than a special case.
+
+---
+
+### AC-14 · Missing error handling for missing data files in `data` module
+Strength: Medium
+Files: server/core/data.py, server/core/assemble.py, server/core/randomizer.py
+
+Problem:
+Multiple modules (`assemble.py`, `randomizer.py`) call into `data` module functions like `data.get_entry()`, `data.load_traits()`, `data.load_outfit_pools()`, `data._load_yaml()` without any error handling for missing or malformed data files. If a YAML file is missing, malformed, or has an unexpected structure, these calls will raise exceptions that propagate up to the caller. There's no graceful degradation or error reporting mechanism. The `assemble.py` module has a comment noting "Unknown ids (a ladder edited since the shot was saved) apply nothing rather than failing the shot" for conditions, but this defensive pattern isn't applied consistently across other data lookups.
+
+Solution:
+Add error handling in the `data` module's public functions to gracefully handle missing files, malformed YAML, or unexpected structures. Return sensible defaults or empty results rather than raising exceptions. Document the error handling behavior.
+
+Benefits:
+Prevents crashes when data files are missing or malformed. Provides better error reporting and debugging information. Makes the system more resilient to configuration changes or incomplete data setups.
+
+---
+
+### AC-15 · Inconsistent handling of empty/missing character data in `character_segment`
+Strength: Medium
+Files: server/core/assemble.py
+
+Problem:
+The `character_segment()` function has early return logic for disabled characters (`if not ch or ch.get("enabled") is False: return "", ""`), but doesn't handle the case where a preset character's `base` field is empty or missing. When `doc.get("base", "")` returns an empty string, `data.normalize_kw("", ...)` is called, which may produce unexpected results. Similarly, if `doc.get("negative_add", "")` is empty, it's still included in the negative segment. The function doesn't validate that required fields exist or have meaningful content before processing.
+
+Solution:
+Add validation for required character fields after loading from preset or secondbrain. Skip or warn when base content is missing. Ensure empty strings don't create empty segments in the final output.
+
+Benefits:
+Prevents silent generation of empty or malformed character segments. Makes missing data more visible during development. Ensures consistent behavior whether characters come from presets, secondbrain, or custom sources.
+
+NOTE: AC-11 critique flag was applied: corrected the misattribution of the defensive pattern comment from `themes.py` to `assemble.py` where it actually appears in the `_condition()` function's docstring.
