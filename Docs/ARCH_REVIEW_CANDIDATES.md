@@ -120,6 +120,50 @@ Collapse to a single public function — either keep `get_theme` with the defaul
 Benefits:
 Callers learn one name for one operation. The default behavior is documented in one place, eliminating the risk of the two functions drifting apart. Code review and maintenance become simpler since there is no longer a hidden alias to track.
 
+### AC-10 · AC-7a: Add public `data.load_themes()` accessor in `server/core/data.py`
+Strength: Strong
+Split-Depth: 1
+Files: server/core/data.py
+
+Problem:
+The theme loading logic in `themes._all()` directly calls private helpers `data._load_yaml` and `data._load_overlay`, creating tight coupling to internal implementation details and duplicating the NSFW overlay merge pattern. Other modules in the codebase use `data`'s public surface without issues, so theme loading should follow the same convention.
+
+Solution:
+Add a new public function `load_themes()` to `server/core/data.py` that encapsulates the current theme loading behavior:
+
+1. Load the base themes YAML from `os.path.join(DATA_DIR, 'themes.yaml')` using the existing `_load_yaml` helper.
+2. Load the NSFW overlay from the relative path `'themes'` using the existing `_load_overlay` helper (which handles the NSFW toggle and file-absence cases).
+3. Merge the overlay onto the base using the existing `_deep_merge` helper.
+4. Return the merged dict.
+
+The function should be placed after the existing public functions in `data.py`, follow the naming convention (no leading underscore), and include a docstring documenting its purpose and return type.
+
+Benefits:
+Encapsulates theme loading logic in a single public API, removes coupling to private helpers (`_load_yaml`, `_load_overlay`), makes the NSFW overlay behavior explicit and reusable, and follows the established pattern of public accessors in `data.py` (e.g., `data.get_entry`, `data.load_traits`).
+
+### AC-11 · AC-7b: Create `server/core/themes.py` with `_all()` using the new public accessor
+Strength: Strong
+Split-Depth: 1
+Files: server/core/themes.py
+Depends-On: AC-10
+
+Problem:
+The `themes` module does not exist yet but is needed to provide theme loading functionality. The module should expose a `_all()` function that returns all themes by loading them from the data directory with NSFW overlay support, using the public API from `data.py` rather than calling private helpers directly.
+
+Solution:
+Create `server/core/themes.py` with the following:
+
+1. Import the `data` module from the same package: `from . import data`
+2. Define a `_all()` function that:
+   - Calls `data.load_themes()` to get the merged themes dict
+   - Returns the result unchanged
+3. Add a docstring explaining that `_all()` returns all themes (including NSFW overlays when enabled)
+
+The function signature and behavior should match what `themes._all()` would have done in the original implementation, but now delegates to the public `data.load_themes()` accessor.
+
+Benefits:
+Provides the `themes` module with a clean public API, uses the public accessor from `data.py` instead of calling private helpers directly, maintains the same external behavior as the original `themes._all()`, and properly separates concerns between data loading (handled by `data.py`) and theme loading (handled by `themes.py`).
+
 ### AC-12 · Corrected Assessment
 Strength: Strong
 
