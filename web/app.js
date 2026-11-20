@@ -320,10 +320,20 @@ async function comfyStatus() {
   try {
     const s = await fetch('/api/comfy/status').then(r => r.json());
     $('#comfyDot').className = 'dot ' + (s.up ? 'up' : 'down');
-    $('#comfyMsg').textContent = s.up
-      ? `ComfyUI ok · ${(s.vram_free / 1e9).toFixed(1)}/${(s.vram_total / 1e9).toFixed(0)} GB free`
-      + (s.lease_held ? ' · holding GPU lease' : '')
-      : 'ComfyUI unreachable';
+    // Check for pipeline GPU guard stop event (SUBTASK 2 contract)
+    if (s.last_guard_event && s.last_guard_event.action === 'stop') {
+      const ev = s.last_guard_event;
+      const at = new Date(ev.at * 1000);
+      const timeStr = at.toTimeString().slice(0, 5); // HH:MM
+      const msg = `stopped by pipeline GPU guard at ${timeStr}: ${ev.reason}`;
+      $('#comfyMsg').textContent = msg;
+      toast(msg);
+    } else {
+      $('#comfyMsg').textContent = s.up
+        ? `ComfyUI ok · ${(s.vram_free / 1e9).toFixed(1)}/${(s.vram_total / 1e9).toFixed(0)} GB free`
+        + (s.lease_held ? ' · holding GPU lease' : '')
+        : 'ComfyUI unreachable';
+    }
     if (s.up && s.checkpoints?.length && $('#model').options.length && $('#model').value.startsWith('('))
       { PRESETS.checkpoint_licenses = (await fetch('/api/presets').then(r => r.json()).catch(() => PRESETS)).checkpoint_licenses || {};
         fillSelect('#model', s.checkpoints); decorateModels(); _prevModel = $('#model').value; }
@@ -450,8 +460,25 @@ function renderComfyBtn(s) {
     b.textContent = 'Start ComfyUI';
     b.onclick = async () => {
       b.disabled = true; b.textContent = 'starting…';
-      const r = await fetch('/api/comfy/start', { method: 'POST' }).then(r => r.json()).catch(() => ({}));
-      if (r.error) toast(r.error);
+      let r;
+      try {
+        const resp = await fetch('/api/comfy/start', { method: 'POST' });
+        const text = await resp.text();
+        try { r = JSON.parse(text); } catch { r = { error: 'Non-JSON response: ' + text.slice(0, 200) }; }
+      } catch (e) {
+        r = { error: e.message || 'Start failed' };
+      }
+      if (!r.ok) {
+        const reason = r.reason || r.error || 'Unknown error';
+        let logTail = '';
+        if (r.log_tail && Array.isArray(r.log_tail)) {
+          logTail = r.log_tail.slice(-5).join("\n");
+        }
+        const message = logTail ? `${reason}\n\n${logTail}` : reason;
+        toast(message);
+      } else if (r.error) {
+        toast(r.error);
+      }
       comfyStatus();
     };
   } else if (s.managed) {
