@@ -235,3 +235,28 @@ Benefits:
 Prevents silent generation of empty or malformed character segments. Makes missing data more visible during development. Ensures consistent behavior whether characters come from presets, secondbrain, or custom sources.
 
 NOTE: AC-11 critique flag was applied: corrected the misattribution of the defensive pattern comment from `themes.py` to `assemble.py` where it actually appears in the `_condition()` function's docstring.
+
+### AC-16 · `character_segment` silently swallows invalid conditions
+Strength: Strong
+
+**Status: REMOVED**
+
+The critique correctly identifies that this is by design. The docstring in `character_segment` explicitly states: "Unknown ids (a ladder edited since the shot was saved) apply nothing rather than failing the shot." This is a deliberate feature, not a bug. The silent failure mode is intentional to handle cases where ladders are edited after shots are saved.
+
+### AC-17 · `roll` has inconsistent RNG seeding for outfit_style
+Strength: Strong
+
+**Status: REMOVED**
+
+The critique correctly identifies that this is a feature request, not a bug. The function signature does not include a `vary_outfit` parameter, so there is no inconsistency to fix. Adding such a parameter would be an enhancement, not a defect correction.
+
+### AC-18 · `get_character` in secondbrain.py has path traversal vulnerability
+Strength: Strong
+
+**Status: REMOVED**
+
+The critique correctly identifies that this claim is factually incorrect. The sanitization removes slashes, preventing path traversal. The example `"../../etc/passwd"` becomes `"..etcpasswd"` after sanitization, which would just look for a non-existent file in CHAR_DIR, not traverse paths.
+
+---
+
+**NOTE:** All three ACs were removed because the critique correctly identified they do not represent real bugs — AC-1 is by design, AC-2 is a feature request, and AC-3 is factually incorrect.
