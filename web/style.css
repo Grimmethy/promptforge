@@ -138,8 +138,9 @@ details.presetEd textarea.yaml { width: 100%; margin: 6px 0; font: 11px/1.4 ui-m
 .tile.loading, .tile[data-job] { aspect-ratio: 2 / 3; }
 /* shimmering skeleton: page-load placeholders (.skel) and each tile until its img decodes (.loading) */
 @keyframes pf-shimmer { to { background-position: -200% 0; } }
+.tile.skel { position: relative; aspect-ratio: 2 / 3; }
+.tile.loading::before { content: ""; position: absolute; inset: 0; }
 .tile.skel, .tile.loading::before {
-  content: ""; position: absolute; inset: 0;
   background: linear-gradient(100deg,
     var(--panel) 30%, var(--panel2) 48%, var(--panel2) 52%, var(--panel) 70%);
   background-size: 200% 100%;
