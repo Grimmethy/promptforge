@@ -6,7 +6,7 @@ import os
 
 from flask import jsonify, request
 
-from core import job_plan, job_run, jobs
+from core import comfy_proc, job_plan, job_run, jobs
 
 _PROXY_HEADERS = ("X-Forwarded-For", "Forwarded", "X-Real-IP")
 _LOCAL = ("127.0.0.1", "::1")
@@ -145,6 +145,14 @@ def register(app, store_factory=None, spawn=None, kill=None):
         body = request.get_json(force=True, silent=True)
         if body is not None and not isinstance(body, dict):
             return jsonify({"error": "the body must be a JSON object"}), 400
+        # Gate on ComfyUI readiness: if it's down, try to start it once.
+        if not comfy_proc.comfy_up():
+            try:
+                comfy_proc.ensure_comfyui_ready()
+            except comfy_proc.ComfyUnavailable as exc:
+                reason = exc.reason or str(exc)
+                return jsonify({"error": "ComfyUI is down and could not be started: %s" % reason,
+                                "log_tail": exc.log_tail if exc.log_tail else None}), 409
         try:
             return jsonify(job_run.start(make(), (body or {}).get("hours"), spawn=spawn)), 202
         except job_run.RunError as exc:
