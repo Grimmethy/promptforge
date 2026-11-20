@@ -63,6 +63,26 @@ def _load_overlay(rel):
     return _load_yaml(os.path.join(NSFW_DIR, rel))
 
 
+# --------------------------------------------------------------------- themes
+
+
+def load_themes():
+    """Return the base ``themes`` mapping from ``DATA_DIR/themes.yaml``, shallow-
+    merged with the NSFW overlay (overlay entries replace base entries
+    wholesale).
+
+    Returns ``{}`` when the file is missing or has no ``themes:`` key. Resolve
+    the path at call time from ``DATA_DIR``.
+    """
+    base = _load_yaml(os.path.join(DATA_DIR, "themes.yaml")).get("themes") or {}
+    over = _load_overlay("themes.yaml").get("themes") or {}
+    if not over:
+        return base
+    merged = dict(base)
+    merged.update(over)
+    return merged
+
+
 def _deep_merge(base, over):
     """Recursively merge `over` onto `base` (dicts merge, other values replace).
     Neither input is mutated."""
