@@ -34,6 +34,16 @@ def rule(css, selector):
     return m.group(1) if m else None
 
 
+def rule_bodies(css, selector):
+    """Whitespace-stripped bodies of every rule whose comma-separated selector list contains exactly `selector`."""
+    out = []
+    for m in re.finditer(r"([^{}]+)\{([^}]*)\}", css):
+        sels = [s.strip() for s in re.sub(r"/\*.*?\*/", "", m.group(1), flags=re.S).split(",")]
+        if selector in sels:
+            out.append(re.sub(r"\s+", "", m.group(2)))
+    return out
+
+
 class GalleryPreviewShapeTest(unittest.TestCase):
     def test_rows_follow_the_pictures_on_a_desktop_and_on_a_phone(self):
         css = read("style.css")
@@ -57,11 +67,22 @@ class GalleryPreviewShapeTest(unittest.TestCase):
         self.assertIsNotNone(shape, "the loading and running tiles need a default shape")
         self.assertRegex(shape, r"aspect-ratio:\s*2\s*/\s*3")
 
-    def test_the_page_load_skeleton_is_left_as_it_was(self):
-        skel = rule(read("style.css"), ".tile.skel, .tile.loading::before")
-        self.assertIsNotNone(skel)
-        self.assertRegex(skel, r"position:\s*absolute")       # an overlay that takes no grid space
-        self.assertNotIn("aspect-ratio", skel)
+    def test_the_page_load_skeleton_takes_up_its_own_grid_space(self):
+        # a page-load skeleton tile used to be an absolute overlay with inset:0, so it covered the whole page instead of sitting in the grid
+        bodies = rule_bodies(read("style.css"), ".tile.skel")
+        self.assertTrue(bodies, "no rule for .tile.skel")
+        for body in bodies:
+            self.assertNotIn("position:absolute", body, ".tile.skel must not be absolutely positioned")
+            self.assertNotIn("inset", body, ".tile.skel must not use inset")
+        self.assertTrue(any("position:relative" in b for b in bodies), ".tile.skel needs position: relative")
+        self.assertTrue(any("aspect-ratio:2/3" in b for b in bodies), ".tile.skel needs aspect-ratio: 2 / 3")
+
+    def test_the_loading_overlay_still_covers_its_tile(self):
+        bodies = rule_bodies(read("style.css"), ".tile.loading::before")
+        self.assertTrue(bodies, "no rule for .tile.loading::before")
+        self.assertTrue(any("position:absolute" in b for b in bodies))
+        self.assertTrue(any("inset:0" in b for b in bodies))
+        self.assertTrue(any('content:""' in b for b in bodies))
 
     def test_the_hover_menu_and_the_progress_bar_are_still_in_place(self):
         css = read("style.css")
