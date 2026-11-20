@@ -329,6 +329,14 @@ def cn_position_in_overlay(name):
     return False
 
 
+def load_themes():
+    """Raw themes dict. Reloaded per request like the rest of the module.
+    The NSFW overlay (data/nsfw/themes) is deep-merged in when enabled."""
+    base = _load_yaml(os.path.join(DATA_DIR, "themes.yaml"))
+    over = _load_overlay("themes")
+    return _deep_merge(base, over) if over else base
+
+
 def fill_outfit(template, colors):
     """Substitute {base|contrast|detail} in an outfit fragment from `colors`.
 
