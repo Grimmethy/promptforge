@@ -182,12 +182,12 @@ def _get_index():
 
 
 def list_characters():
-    return sorted(slug for slug, c in _index().items() if c["base"])
+    return sorted(c["_slug"] for c in _get_index().values() if c["base"])
 
 
 def character_names():
     """Display names of every listed character (those with a keyword block), for matching gallery images to characters."""
-    return sorted(c["name"] for c in _index().values() if c["base"])
+    return sorted(c["name"] for c in _get_index().values() if c["base"])
 
 
 def get_character(name):
@@ -196,7 +196,8 @@ def get_character(name):
     want = re.sub(r"[^a-z0-9]+", "", str(name or "").lower())
     if not want:
         return {}
-    for slug, c in _index().items():
+    for c in _get_index().values():
+        slug = c.get("_slug") or ""
         if want in (re.sub(r"[^a-z0-9]+", "", slug.lower()), re.sub(r"[^a-z0-9]+", "", c["name"].lower())):
             return {k: v for k, v in c.items() if not k.startswith("_")}
     return {}
