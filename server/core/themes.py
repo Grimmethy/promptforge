@@ -1,23 +1,13 @@
 """Theme presets — bundles of tag contributions (style / setting / palette /
 lighting / negative). See data/themes.yaml."""
 
-import os
-
 from . import data
-
-_PATH = os.path.join(data.DATA_DIR, "themes.yaml")
 
 _KEYS = ("style", "setting_bias", "palette", "lighting", "negative_add")
 
 
 def _all():
-    base = data._load_yaml(_PATH).get("themes") or {}
-    over = data._load_overlay("themes.yaml").get("themes") or {}
-    if not over:
-        return base
-    merged = dict(base)
-    merged.update(over)
-    return merged
+    return data.load_themes()
 
 
 def list_themes():
