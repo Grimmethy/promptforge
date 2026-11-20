@@ -15,11 +15,38 @@
   };
 
   // 'Queue: 3 jobs · 12 pictures · ~4m (rough)', or '' when there is nothing queued.
-  const summaryText = (est) => {
+  const estimateText = (est) => {
     if (!est || !est.queued) return '';
     const jobs = est.queued + (est.queued === 1 ? ' job' : ' jobs');
     const pics = est.pictures + (est.pictures === 1 ? ' picture' : ' pictures');
     return 'Queue: ' + jobs + ' · ' + pics + ' · ~' + formatDuration(est.total_seconds) + (est.rough ? ' (rough)' : '');
+  };
+
+  // Run phases in the order scripts/jobs/window_run.py writes them; refused and forge-failed end the run before anything starts.
+  const PHASE_ORDER = ['forge-on', 'rendering', 'leaving', 'done'];
+  const FAILED_PHASES = ['refused', 'forge-failed'];
+
+  // What a GET /api/jobs/run payload means. The reason is read from the payload passed in on every call, never cached.
+  const runOutcome = (state) => {
+    const s = state && typeof state === 'object' ? state : {};
+    const phase = typeof s.phase === 'string' ? s.phase : '';
+    // Assumption: the server may send reasons[] (array) instead of reason (string); join it in that case.
+    const reason = typeof s.reason === 'string' ? s.reason : (Array.isArray(s.reasons) ? s.reasons.join('; ') : '');
+    const failed = FAILED_PHASES.indexOf(phase) !== -1;
+    const started = PHASE_ORDER.indexOf(phase) > PHASE_ORDER.indexOf('forge-on');
+    return { phase: phase, reason: reason, started: started, failed: failed };
+  };
+
+  // True only once the window is past forge-on (never for refused or forge-failed).
+  const startedToastAllowed = (state) => runOutcome(state).started;
+
+  // Run-state text for a payload with a phase; otherwise the queue estimate text.
+  const summaryText = (state) => {
+    if (state && typeof state === 'object' && typeof state.phase === 'string') {
+      const o = runOutcome(state);
+      return o.failed ? 'Last window did not start: ' + (o.reason || o.phase) : o.phase;
+    }
+    return estimateText(state);
   };
 
   // [{requester, jobs, pictures}] sorted by requester; jobs keep their input order.
@@ -79,7 +106,7 @@
     return run && run.running ? label : [summary, label].filter(Boolean).join(' · ');
   };
 
-  const api = { formatDuration, summaryText, groupByRequester, jobRow, parseHours, canRun, confirmText, runLabel, headerText };
+  const api = { formatDuration, summaryText, runOutcome, startedToastAllowed, groupByRequester, jobRow, parseHours, canRun, confirmText, runLabel, headerText };
   root.PFQueue = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

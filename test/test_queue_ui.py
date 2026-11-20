@@ -90,6 +90,17 @@ class WiringTest(unittest.TestCase):
         body = app[app.index("async function comfyStatus()"):app.index("async function queueStatus()")]
         self.assertIn("queueStatus();", body)
 
+    def test_window_started_toast_only_on_the_started_branch(self):
+        app = read("app.js")
+        # Comment lines may mention the phrase; only code lines count.
+        code = "\n".join(l for l in app.splitlines() if not l.lstrip().startswith("//"))
+        self.assertLessEqual(code.count("window started"), 1)
+        at = code.find("window started")
+        if at >= 0:
+            # Kept loose on purpose: the branch may test the phase or call the startedToastAllowed helper.
+            before = code[max(0, at - 400):at]
+            self.assertTrue("forge-on" in before or "startedToastAllowed" in before)
+
     def test_opening_the_panel_draws_it_at_once(self):
         app = read("app.js")
         click = app[app.index("sum.onclick"):]
