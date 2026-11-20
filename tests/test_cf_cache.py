@@ -146,5 +146,66 @@ class CfCacheTest(unittest.TestCase):
         self.assertEqual(self.calls, 3)
 
 
+class PresetsEndpointCacheTest(unittest.TestCase):
+    """60 characters: /api/presets answers fast and builds the index exactly once.
+
+    app.py imports the package as `core`, so this class uses `core.cf_characters` (a different
+    module object from `server.core.cf_characters` used above) to reset and wrap the same cache."""
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "server"))
+        try:
+            import app as pf
+        except ImportError as exc:  # flask etc. not installed in this environment
+            self.skipTest("server.app not importable: %s" % exc)
+        from core import cf_characters as cfc
+        self.pf, self.cfc = pf, cfc
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        chars = os.path.join(tmp.name, "characters")
+        os.makedirs(chars)
+        for i in range(60):
+            name = "Char%02d" % i
+            with open(os.path.join(chars, name.lower() + ".md"), "w", encoding="utf-8") as fh:
+                fh.write(_card(name))
+
+        p = mock.patch.dict(os.environ, {"CHARACTERFORGE_ROOT": tmp.name, "CHARACTERFORGE_DIR": chars})
+        p.start()
+        self.addCleanup(p.stop)
+        os.environ.pop("PROMPTFORGE_CHARACTER_SOURCE", None)
+
+        saved = (cfc._index_cache, cfc._index_mtime)
+        cfc._index_cache, cfc._index_mtime = {}, None
+        self.addCleanup(lambda: (setattr(cfc, "_index_cache", saved[0]), setattr(cfc, "_index_mtime", saved[1])))
+        pf._PRESETS_CACHES.clear()
+        self.addCleanup(pf._PRESETS_CACHES.clear)
+
+        self.builds = 0
+        real_build = cfc._build_index
+
+        def counting():
+            self.builds += 1
+            return real_build()
+
+        p2 = mock.patch.object(cfc, "_build_index", side_effect=counting)
+        p2.start()
+        self.addCleanup(p2.stop)
+        p3 = mock.patch.object(pf, "list_models", return_value=[])
+        p3.start()
+        self.addCleanup(p3.stop)
+
+    def test_presets_with_60_characters_builds_once_and_is_fast(self):
+        import time
+        t0 = time.perf_counter()
+        resp = self.pf.app.test_client().get("/api/presets")
+        elapsed = time.perf_counter() - t0
+        self.assertEqual(resp.status_code, 200)
+        self.assertLess(elapsed, 1.0)
+        self.assertEqual(self.builds, 1)
+        self.assertEqual(len(self.cfc.list_characters()), 60)
+        self.assertEqual(self.builds, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
