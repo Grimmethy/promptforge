@@ -330,6 +330,65 @@ async function comfyStatus() {
     renderComfyBtn(s);
   } catch { $('#comfyMsg').textContent = '?'; }
   queueStatus(); // poll-ok: rides comfyStatus's existing 15 s setInterval; adds no timer, only three GETs per tick.
+  const runBtn = $('#runQueueBtn');
+  if (runBtn && !runBtn.onclick) runBtn.onclick = startRun;
+  if (awaitingRun) runOutcomeTick(); // poll-ok: only while a Start is awaiting its outcome; rides the same tick.
+}
+
+// Start -> outcome. The spawn response only means the process was launched, so 'window started' is toasted from the run state, never from here.
+let awaitingRun = false;
+let runBaseline = null;      // the GET /api/jobs/run payload as it was before the Start click
+let runInFlight = false;
+
+async function fetchRunState() {
+  try { return await fetch('/api/jobs/run').then(r => r.json()); } catch { return null; }
+}
+
+// True when the payload is the run this Start created, not one that predates the click.
+function isFreshRun(st) {
+  if (!st || typeof st !== 'object' || typeof st.phase !== 'string') return false;
+  const b = runBaseline;
+  if (!b || typeof b !== 'object') return true;
+  if (st.run_id != null || b.run_id != null) return st.run_id !== b.run_id;
+  if (st.started_at != null || b.started_at != null) return st.started_at !== b.started_at;
+  return !(st.phase === b.phase && st.reason === b.reason && st.exit === b.exit
+    && JSON.stringify(st.reasons || null) === JSON.stringify(b.reasons || null));
+}
+
+function handleRunPayload(st) {
+  if (!awaitingRun || !isFreshRun(st)) return;
+  const o = PFQueue.runOutcome(st);
+  const sum = $('#queueSummary');
+  if (o.failed) {
+    awaitingRun = false;
+    const text = PFQueue.summaryText(st);
+    sum.textContent = text; sum.style.display = text ? '' : 'none';
+    toast('Window did not start: ' + (o.reason || o.phase));
+  } else if (PFQueue.startedToastAllowed(st)) {
+    awaitingRun = false;
+    const text = PFQueue.summaryText(st);
+    sum.textContent = text; sum.style.display = text ? '' : 'none';
+    toast('window started');
+  }
+}
+
+async function runOutcomeTick() {
+  if (runInFlight) return;
+  runInFlight = true;
+  try { handleRunPayload(await fetchRunState()); } finally { runInFlight = false; }
+}
+
+async function startRun() {
+  if (awaitingRun) return;
+  if (!confirm(PFQueue.confirmText(null, 2))) return;
+  runBaseline = await fetchRunState();
+  const r = await fetch('/api/jobs/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hours: 2 }) })
+    .then(r => r.json()).catch(() => ({ error: 'the server did not answer' }));
+  if (r.error) { toast(r.error); return; }
+  const sum = $('#queueSummary');
+  sum.textContent = 'starting...'; sum.style.display = '';
+  awaitingRun = true;
+  runOutcomeTick();
 }
 
 // The render job queue in the header: a one-line summary (and a panel behind it) fed by /api/jobs/estimate and /api/jobs. Called from comfyStatus's
