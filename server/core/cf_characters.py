@@ -22,6 +22,7 @@ Characters with no `## Keywords` block are not listed: there is nothing to rende
 
 import os
 import re
+import threading
 
 import yaml
 
@@ -118,13 +119,75 @@ def _index():
     return seen
 
 
+_index_cache = {}
+_index_mtime = None  # signature of the last build; None = never built
+_index_lock = threading.Lock()
+
+
+def _md_files(d):
+    try:
+        names = sorted(os.listdir(d))
+    except OSError:
+        return []
+    return [fn for fn in names if fn.endswith(".md") and not fn.startswith((".", "_"))]
+
+
+def _mtime(path):
+    try:
+        return os.stat(path).st_mtime_ns
+    except OSError:
+        return None
+
+
+def _mtime_signature():
+    """Tuple of (path, mtime) for every dir from _dirs() and each .md file in them."""
+    sig = []
+    for d in _dirs():
+        sig.append((d, _mtime(d)))
+        for fn in _md_files(d):
+            p = os.path.join(d, fn)
+            sig.append((p, _mtime(p)))
+    return tuple(sig)
+
+
+def _build_index():
+    """{lowercased character name: parsed character} across all dirs (characters/ and
+    samples/), user characters shadowing same-named samples."""
+    out = {}
+    seen_slugs = set()
+    for d in _dirs():
+        for fn in _md_files(d):
+            slug = os.path.splitext(fn)[0]
+            if slug in seen_slugs:
+                continue
+            c = _load(os.path.join(d, fn))
+            if not c:
+                continue
+            seen_slugs.add(slug)
+            key = str(c.get("name") or slug).lower()
+            out.setdefault(key, c)
+    return out
+
+
+def _get_index():
+    """Cached {lowercased name: character}; rebuilt only when a dir or .md mtime changes.
+    The result is shared: callers must treat it as read-only."""
+    global _index_cache, _index_mtime
+    with _index_lock:
+        sig = _mtime_signature()
+        if _index_mtime is None or sig != _index_mtime:
+            _index_cache = _build_index()
+            _index_mtime = sig
+        return _index_cache
+
+
 def list_characters():
-    return sorted(slug for slug, c in _index().items() if c["base"])
+    return sorted(c["_slug"] for c in _get_index().values() if c["base"])
 
 
 def character_names():
     """Display names of every listed character (those with a keyword block), for matching gallery images to characters."""
-    return sorted(c["name"] for c in _index().values() if c["base"])
+    return sorted(c["name"] for c in _get_index().values() if c["base"])
 
 
 def get_character(name):
@@ -133,7 +196,8 @@ def get_character(name):
     want = re.sub(r"[^a-z0-9]+", "", str(name or "").lower())
     if not want:
         return {}
-    for slug, c in _index().items():
+    for c in _get_index().values():
+        slug = c.get("_slug") or ""
         if want in (re.sub(r"[^a-z0-9]+", "", slug.lower()), re.sub(r"[^a-z0-9]+", "", c["name"].lower())):
             return {k: v for k, v in c.items() if not k.startswith("_")}
     return {}
