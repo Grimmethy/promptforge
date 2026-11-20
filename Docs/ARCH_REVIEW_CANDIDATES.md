@@ -163,3 +163,45 @@ The function signature and behavior should match what `themes._all()` would have
 
 Benefits:
 Provides the `themes` module with a clean public API, uses the public accessor from `data.py` instead of calling private helpers directly, maintains the same external behavior as the original `themes._all()`, and properly separates concerns between data loading (handled by `data.py`) and theme loading (handled by `themes.py`).
+
+### AC-12 · Corrected Assessment
+Strength: Strong
+
+**Status:** Original draft withdrawn — the flagged issue does not exist.
+
+**Reasoning:**
+
+The original draft mischaracterized two separate, correctly-separated data loading systems as "duplicates." The critique correctly identifies that:
+
+1. `secondbrain.get_character()` loads from markdown notes (`$SECOND_BRAIN_DIR/Characters/*.md`)
+2. `data.get_character()` loads from YAML preset files (`data/characters/<name>.yaml`)
+
+These are **different data sources** with different formats, schemas, and use cases. They are not duplicates — they are separate implementations for separate concerns.
+
+**Why consolidation would be wrong:**
+
+- YAML presets and markdown notes are fundamentally incompatible data formats
+- Merging them into one function would create a monolithic loader handling two unrelated schemas
+- The current separation is architecturally correct — each module owns its data source
+- The comment in `assemble.py` about "secondbrain is architecturally identical to custom" refers to source type handling within `assemble.py`, not the loading mechanism itself
+
+**Conclusion:**
+
+No code changes needed. The two loaders serve different purposes and should remain separate. The original AC-004 draft was based on a false premise.
+
+NOTE: The critique's conclusion that "NO ISSUES FOUND" applies to the code itself — the original draft's assessment was incorrect, not the implementation.
+
+### AC-13 · Tight coupling between `secondbrain.py` and `data` for character resolution
+Strength: Strong
+Files: server/core/secondbrain.py, server/core/data.py, server/core/assemble.py
+
+Problem:
+`secondbrain.py` provides `get_character()` which returns `{"name": ..., "base": ...}`, but `assemble.py`'s `character_segment()` expects a character dict with keys like `source`, `name`, `outfit`, `expression`, `weight`, `text`, and `condition`. When `source == "secondbrain"`, the caller must manually construct a character dict with the resolved `text` field and pass it through the same `character_segment()` path as presets. This creates an architectural inconsistency: secondbrain characters are architecturally identical to custom characters (as noted in the comment), but they flow through a different resolution path that bypasses the unified `data.get_character()` interface. The secondbrain integration is a thin wrapper that doesn't leverage the shared character resolution logic, creating a parallel code path that must be maintained separately.
+
+Solution:
+Refactor so that secondbrain characters go through the same `data.get_character()` path as presets, with a unified `source` resolution in `data` that handles both YAML and markdown sources. This eliminates the parallel code path and ensures both sources use the same resolution logic.
+
+Benefits:
+Eliminates the architectural split between secondbrain and preset character resolution. Future changes to character processing only need to happen in one place. The secondbrain integration becomes a transparent data source rather than a special case.
+
+---
