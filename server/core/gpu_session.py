@@ -48,6 +48,10 @@ LOCK_WAIT_S = int(os.environ.get("FORGE_LOCK_WAIT_S", "90"))
 EVICT_WAIT_S = int(os.environ.get("FORGE_EVICT_WAIT_S", "45"))
 # How long a second job waits for the job that is starting the session (90 s lock wait + 45 s eviction + a 2-5 min ComfyUI cold start).
 START_WAIT_S = int(os.environ.get("FORGE_START_WAIT_S", "600"))
+# A ComfyUI started this recently is never stopped on the pipeline's yield request (must exceed COMFY_START_TIMEOUT_S so a
+# slow cold start cannot be killed by the pipeline's GPU guard right as it comes up).
+COMFY_START_GRACE_S = max(int(os.environ.get("FORGE_COMFY_START_GRACE_S", str(int(comfy_proc.COMFY_START_TIMEOUT_S) + 60))),
+                          int(comfy_proc.COMFY_START_TIMEOUT_S) + 1)
 INTERRUPTED_PREFIX = "the session ended while starting ("   # shared by _end_locked and _join_starting
 LOCKS_DIR = os.path.expanduser(os.environ.get(
     "AGENT_MANAGER_MODEL_LOCKS_DIR", "/media/model-cache/github/agent-manager/instances/.model-locks"))
@@ -58,6 +62,27 @@ _session = None          # dict while a session is active
 _keeper = None
 last_end_reason = None   # why the most recent session ended (shown to a job that lost the GPU)
 _activity_probe = lambda: False   # set by comfy.py: "is a PromptForge job running?"
+_last_guard_event = {"actor": None, "reason": None, "at": None, "action": None}   # who/why/when the pipeline guard last stopped or refused
+
+
+def _record_guard_event(actor, reason, action):
+    global _last_guard_event
+    with _lock:
+        _last_guard_event = {"actor": actor, "reason": reason, "at": time.time(), "action": action}
+
+
+def get_last_guard_event():
+    """Copy of the most recent guard decision: {actor, reason, at, action} (action is 'stopped' or 'refused')."""
+    with _lock:
+        return dict(_last_guard_event)
+
+
+def _comfy_started_at():
+    fn = getattr(comfy_proc, "comfy_started_at", None)
+    try:
+        return fn() if fn else None
+    except Exception:   # noqa: BLE001
+        return None
 
 
 class SessionError(RuntimeError):
@@ -357,10 +382,24 @@ def yield_to_pipeline():
     """The pipeline asks for the GPU. Granted unless a Forge job is running right now."""
     with _lock:
         if _activity_probe() or comfy_queue_busy():
-            return {"yielded": False, "reason": "a Forge job is running"}
+            reason = "a Forge job is running"
+            _record_guard_event("pipeline", reason, "refused")
+            return {"yielded": False, "reason": reason}
+        started = _comfy_started_at()
+        if started is not None and comfy_proc.comfy_up():
+            age = time.time() - started
+            if age < COMFY_START_GRACE_S:
+                reason = "ComfyUI started %ds ago; within the %ds start grace" % (max(age, 0), COMFY_START_GRACE_S)
+                _record_guard_event("pipeline", reason, "refused")
+                return {"yielded": False, "reason": reason}
+    was_up = comfy_proc.comfy_up()
     ended = end("pipeline-requested", stop_comfy=True)
+    stopped = bool(ended) or bool(was_up)
     if not ended and comfy_proc.comfy_up():
         stop_comfyui_anywhere()      # ComfyUI left running with no session (manual launch): stop it too
+        stopped = True
+    if stopped:
+        _record_guard_event("pipeline", "pipeline-requested", "stopped")
     return {"yielded": True, "reason": "forge session ended" if ended else "no session"}
 
 
