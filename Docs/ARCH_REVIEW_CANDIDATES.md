@@ -205,3 +205,32 @@ Benefits:
 Eliminates the architectural split between secondbrain and preset character resolution. Future changes to character processing only need to happen in one place. The secondbrain integration becomes a transparent data source rather than a special case.
 
 ---
+
+### AC-19 · AC-13a: Unify character resolution through `data.get_character()`
+Strength: Strong
+Split-Depth: 1
+Files: server/core/data.py, server/core/secondbrain.py
+
+Problem:
+`data.get_character()` currently only loads from YAML presets. `secondbrain.get_character()` returns a minimal `{name, base}` dict that bypasses the unified schema. `assemble.character_segment()` has a special case (`if src in ("custom", "secondbrain")`) because secondbrain characters don't flow through `data.get_character()`. This creates two parallel resolution paths and forces the assembler to treat secondbrain specially.
+
+Solution:
+Extend `data.get_character(name, source=None)` to accept a `source` parameter. When `source == "secondbrain"`, call `secondbrain.get_character()` and wrap the result in the unified character schema (`source`, `name`, `base`, `conditions: []`, `negative_add: ""`). The `source` parameter defaults to `None` for backward compatibility with existing callers that don't pass it. `secondbrain.get_character()` is left as-is (returns `{name, base}`) since the wrapping happens in `data.get_character()`.
+
+Benefits:
+Single entry point for character resolution. Secondbrain characters now have the same schema as presets, enabling the assembler to remove its special case. No breaking changes to existing callers of `data.get_character()` or `secondbrain.get_character()`.
+
+### AC-20 · AC-13b: Remove secondbrain special case from assembler
+Strength: Strong
+Split-Depth: 1
+Files: server/core/assemble.py
+Depends-On: AC-19
+
+Problem:
+`assemble.character_segment()` has `if src in ("custom", "secondbrain"):` that routes secondbrain characters through a simplified path using `ch.get("text")` directly. This special case exists because secondbrain characters bypassed `data.get_character()`. With AC-13a, secondbrain characters now flow through `data.get_character()` and have the same schema as presets, making this branch dead code.
+
+Solution:
+Remove the `if src in ("custom", "secondbrain"):` branch. Route all non-custom sources (including secondbrain) through the existing preset path that calls `data.get_character()`. The `text` field from the character spec is still used as an override (via `custom` variable) for both presets and secondbrain, preserving the existing behavior.
+
+Benefits:
+Eliminates the parallel code path. Secondbrain characters now resolve identically to presets, ensuring consistent schema handling. Simplifies the function and removes a source of confusion.
