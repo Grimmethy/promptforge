@@ -260,3 +260,54 @@ The critique correctly identifies that this claim is factually incorrect. The sa
 ---
 
 **NOTE:** All three ACs were removed because the critique correctly identified they do not represent real bugs — AC-1 is by design, AC-2 is a feature request, and AC-3 is factually incorrect.
+
+### AC-21 · Secondbrain character resolution bypasses unified path
+Strength: Strong
+
+**Strength:** Strong
+**Files:** `server/core/secondbrain.py`, `server/core/assemble.py`
+
+**Problem:**
+`secondbrain.get_character()` returns a dict with keys like `"name"` and `"base"`, but `assemble.character_segment()` expects a character dict with keys `"source"`, `"name"`, `"outfit"`, `"expression"`, `"weight"`, `"text"`, and `"condition"`. When `source == "secondbrain"`, the caller must manually construct a character dict with the resolved text field and pass it through the same `character_segment()` path as presets. This creates an architectural inconsistency: secondbrain characters are architecturally identical to custom characters, but they flow through a different resolution path that bypasses the unified `data.get_character()` interface.
+
+**Solution:**
+Refactor so that secondbrain characters go through the same `data.get_character()` path as presets, with a unified source resolution in `data` that handles both YAML and markdown sources. This eliminates the parallel code path and ensures both sources use the same resolution logic.
+
+**Benefits:**
+Eliminates the architectural split between secondbrain and preset character resolution, ensures future changes to character processing only need to happen in one place, and makes the secondbrain integration a transparent data source rather than a special case.
+
+---
+
+### AC-22 · themes.py resolve() docstring promises merging that isn't implemented
+Strength: Strong
+
+**Strength:** Strong
+**Files:** `server/core/themes.py`
+
+**Problem:**
+The `resolve()` function's docstring states it should return a theme with `negative_add` merged into the negative, but the implementation just calls `get_theme()` which returns the raw theme dict without any merging. This creates a documentation-code mismatch that could lead to bugs if callers rely on the documented behavior.
+
+**Solution:**
+Either implement the actual merging logic in `resolve()` as documented, update the docstring to reflect the current behavior (just returns the raw theme dict), or rename the function to avoid implying behavior that isn't implemented.
+
+**Benefits:**
+Eliminates confusion about what `resolve()` actually does, prevents potential bugs from callers expecting the documented behavior, and makes the API contract explicit and accurate.
+
+---
+
+### AC-23 · assemble.py expects pre-resolved scene_tags with unclear resolution responsibility
+Strength: Strong
+
+**Strength:** Strong
+**Files:** `server/core/assemble.py`, `server/core/themes.py`
+
+**Problem:**
+`assemble()` expects `scene_tags` to be already resolved, but `themes.resolve()` exists to do the resolution. The coupling between who resolves themes and who applies them is unclear from these files alone. If `assemble()` is called with unresolved theme names, the resolution step is silently skipped.
+
+**Solution:**
+Either have `assemble()` call `themes.resolve()` internally to handle resolution, document clearly that callers must pre-resolve `scene_tags`, or add validation to fail fast if `scene_tags` contains unresolved theme names.
+
+**Benefits:**
+Makes the resolution responsibility explicit, prevents silent failures when theme names aren't resolved, and reduces coupling between callers and theme resolution logic.
+
+NOTE: The independent review found no issues with the original draft — all four flagged leads were verified against the actual code and concluded "NO ISSUES FOUND," so the draft was reproduced unchanged.
