@@ -1,5 +1,5 @@
 """HTTP routes of the render job queue (/api/jobs). Registered on the Flask app by server/app.py; the store is built per request so the jobs folder
-(PROMPTFORGE_JOBS_DIR) is read at call time. Reads are open to anyone who can reach the service; every write must come from this machine.
+(PROMPTFORGE_JOBS_DIR) is read at call time. Reads are open to anyone who can reach the service; every write must come from this machine or the owner's other machine through the tailnet gateway.
 """
 import datetime
 import os
@@ -13,7 +13,7 @@ _LOCAL = ("127.0.0.1", "::1")
 
 
 def loopback_only(req):
-    """True when the request came straight from this machine: a loopback address and no proxy header (the tailnet gateway adds one)."""
+    """True when the request reached this process from a loopback address with no proxy header. Requests relayed by the owner-only tailnet gateway (scripts/tailnet-gateway.js in agent-manager, plain TCP, adds no proxy header) arrive as 127.0.0.1 and pass this check, so the owner's other machine is admitted; a request carrying X-Forwarded-For, Forwarded or X-Real-IP is refused."""
     return req.remote_addr in _LOCAL and not any(req.headers.get(h) for h in _PROXY_HEADERS)
 
 
