@@ -160,3 +160,26 @@ Replace the empty catch body with a single `console.error('loadGallery failed:',
 
 Benefits:
 Developers and operators now see a timestamped, context-labelled error in the browser console or Node stderr the moment a gallery load fails, eliminating the "blank gallery, no clue" debugging cycle. Rethrowing preserves the promise chain so any retry logic, error-boundary, or user-facing toast that keys off a rejected promise will actually fire. The fix is a two-line change scoped to one catch block, with no API or dependency surface added.
+
+### AC-8 · Silent swallow of `pf.models()` failures in job runner
+Strength: Strong
+Files: scripts/jobs/runner.py
+Snippet:
+```
+            return 1
+        try:
+            available = set(pf.models() or [])
+        except Exception:  # noqa: BLE001
+            available = set()
+        beat()
+        fails, last_requester = 0, None
+```
+
+Problem:
+The `except Exception:` block on the `pf.models()` call swallows all errors without logging or signaling. If model listing fails due to initialization issues, network problems, or API errors, the code silently continues with an empty model set. This is inconsistent with the preceding `pf.gpu_acquire()` error handling (lines 163-169) which logs failures and returns early. Operators have no visibility into why jobs might be failing or behaving unexpectedly when model availability is critical.
+
+Solution:
+Add logging and return early if model listing fails, consistent with the gpu_acquire block pattern. Use the existing `out()` function for output and append to the `reasons` list if available, then return 1 to signal failure. This ensures operators are notified of model listing failures and jobs don't proceed with an empty model set.
+
+Benefits:
+Operators will be immediately aware when model listing fails, enabling faster diagnosis and resolution. Jobs won't silently proceed with no available models, preventing downstream failures that are difficult to trace back to the root cause. The error handling is now consistent across both GPU acquisition and model listing operations.
