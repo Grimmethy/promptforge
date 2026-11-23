@@ -76,6 +76,26 @@ class AddTest(RoutesBase):
         self.assertEqual(self.store.list(), [])
 
 
+class _FakeReq:
+    def __init__(self, remote_addr, headers=None):
+        self.remote_addr = remote_addr
+        self.headers = headers or {}
+
+
+class LoopbackOnlyTest(unittest.TestCase):
+    def test_loopback_without_proxy_header_is_allowed(self):
+        self.assertTrue(jobs_routes.loopback_only(_FakeReq("127.0.0.1")))
+        self.assertTrue(jobs_routes.loopback_only(_FakeReq("::1")))
+
+    def test_each_proxy_header_is_refused(self):
+        for h in jobs_routes._PROXY_HEADERS:
+            with self.subTest(header=h):
+                self.assertFalse(jobs_routes.loopback_only(_FakeReq("127.0.0.1", {h: "100.64.0.1"})))
+
+    def test_non_loopback_address_is_refused(self):
+        self.assertFalse(jobs_routes.loopback_only(_FakeReq("10.0.0.5")))
+
+
 class ReadTest(RoutesBase):
     def test_list_filters_and_counts(self):
         a = self.file_job(requester="a")
