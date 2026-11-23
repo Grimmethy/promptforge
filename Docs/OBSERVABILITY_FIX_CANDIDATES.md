@@ -183,3 +183,26 @@ Add logging and return early if model listing fails, consistent with the gpu_acq
 
 Benefits:
 Operators will be immediately aware when model listing fails, enabling faster diagnosis and resolution. Jobs won't silently proceed with no available models, preventing downstream failures that are difficult to trace back to the root cause. The error handling is now consistent across both GPU acquisition and model listing operations.
+
+### AC-9 · Silent swallow in timing data collection lacks observability
+Strength: Strong
+Files: scripts/jobs/runner.py
+Snippet:
+```
+        if secs > 0:
+            try:
+                job_plan.append_timing(timings_path, {"model": rec["model"], "width": rec["width"], "height": rec["height"], "steps": rec["steps"], "seconds": secs})
+            except (ValueError, OSError):
+                pass
+        if deliver is not None:
+            try:
+```
+
+Problem:
+The `except (ValueError, OSError): pass` at line 266 silently swallows errors from `job_plan.append_timing()` with no logging, re-raise, or fallback. When the timings file becomes unwritable due to permission issues, disk exhaustion, or path invalidity, the code continues reporting success while losing all timing metadata. The adjacent `deliver()` block (lines 270-275) uses `# noqa: BLE001` to acknowledge its intentional swallow, but the timing block lacks this deliberation — suggesting the `pass` may have been added without the same consideration for observability.
+
+Solution:
+Replace the bare `pass` with a log statement using the project's existing `out()` primitive (visible at line 257), providing enough context to identify the problematic seed and error. This preserves the non-fatal behavior — the picture was already generated and the row recorded — while making timing write failures visible for debugging.
+
+Benefits:
+Systematic failures in timing data collection become detectable instead of silent. When timing data goes missing from `timings_path`, operators will have a log entry indicating which seed failed and why, rather than starting from zero context. The fix uses only the `out()` primitive already present in the file, requiring no new dependencies.
