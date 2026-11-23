@@ -81,6 +81,34 @@ _OLLAMA_RESIDENT_MIN_MB = 1024
 class ComfyUnavailable(RuntimeError):
     """ComfyUI could not be made ready."""
 
+    def __init__(self, message="", reason=None, log_tail=None):
+        super().__init__(message)
+        self.reason = reason
+        self.log_tail = list(log_tail) if log_tail else []
+
+
+_comfy_started_at = None
+
+
+def comfy_started_at():
+    """Epoch seconds of the last successful cold start, else None."""
+    return _comfy_started_at
+
+
+def _log_tail_lines(n=40):
+    """Last n lines of COMFY_LOG as a list of str; [] on any problem."""
+    try:
+        if n <= 0:
+            return []
+        with open(COMFY_LOG, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - 65536))
+            data = f.read()
+        return data.decode("utf-8", errors="replace").splitlines()[-n:]
+    except Exception:
+        return []
+
 
 # ------------------------------------------------------------------- probes
 
@@ -474,6 +502,8 @@ def ensure_comfyui_ready(set_step=None, job_id=None):
 
     if comfy_up():
         return {"started": False, "lease_taken": False, "target_gpu": None, "evicted": []}
+    global _comfy_started_at
+    _comfy_started_at = None
     refuse_if_foreign()   # even with room to spare: the reservation holder (e.g. a vLLM eval) needs the card it reserved
 
     plan = plan_comfyui_placement()
@@ -501,6 +531,7 @@ def ensure_comfyui_ready(set_step=None, job_id=None):
         deadline = time.time() + COMFY_START_TIMEOUT_S
         while time.time() < deadline:
             if comfy_up():
+                _comfy_started_at = time.time()
                 return {
                     "started": True,
                     "lease_taken": lease_taken,
@@ -510,16 +541,26 @@ def ensure_comfyui_ready(set_step=None, job_id=None):
             time.sleep(2)
 
         raise ComfyUnavailable(
-            f"ComfyUI did not become ready within {COMFY_START_TIMEOUT_S}s -- see {COMFY_LOG}"
-        )
-    except ComfyUnavailable:
+            f"ComfyUI did not become ready within {COMFY_START_TIMEOUT_S}s -- see {COMFY_LOG}",
+            reason="timeout",
+            log_tail=_log_tail_lines(),
+        ) from None
+    except ComfyUnavailable as exc:
+        if not exc.reason:
+            exc.reason = "unavailable"
+        if not exc.log_tail:
+            exc.log_tail = _log_tail_lines()
         if lease_taken:
             lease_release()
         raise
     except Exception as exc:
         if lease_taken:
             lease_release()
-        raise ComfyUnavailable(f"failed to start ComfyUI: {exc}") from exc
+        raise ComfyUnavailable(
+            f"failed to start ComfyUI: {exc}",
+            reason="error",
+            log_tail=_log_tail_lines(),
+        ) from exc
 
 
 # ------------------------------------------------------------------- generation claim

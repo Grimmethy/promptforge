@@ -331,6 +331,42 @@ class YieldAndEndTests(Base):
         self.assertTrue(r["yielded"])
         self.assertEqual(self.calls, [("stop_comfy",)])
 
+    def _started(self, age_s):
+        p = mock.patch.object(cp, "comfy_started_at", lambda: time.time() - age_s, create=True)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_grace_constant_exceeds_start_timeout(self):
+        self.assertGreater(gs.COMFY_START_GRACE_S, cp.COMFY_START_TIMEOUT_S)
+
+    def test_yield_is_refused_within_start_grace_and_comfy_is_not_stopped(self):
+        self.comfy_up = True
+        self._started(10)
+        r = gs.yield_to_pipeline()
+        self.assertFalse(r["yielded"])
+        self.assertIn("grace", r["reason"])
+        self.assertEqual(self.calls, [])
+        ev = gs.get_last_guard_event()
+        self.assertEqual(ev["action"], "refused")
+        self.assertEqual(set(ev), {"actor", "reason", "at", "action"})
+
+    def test_yield_is_granted_outside_grace_when_idle_and_records_the_stop(self):
+        self.comfy_up = True
+        self._started(gs.COMFY_START_GRACE_S + 5)
+        r = gs.yield_to_pipeline()
+        self.assertTrue(r["yielded"])
+        self.assertEqual(self.calls, [("stop_comfy",)])
+        ev = gs.get_last_guard_event()
+        self.assertEqual(ev["action"], "stopped")
+        self.assertIsNotNone(ev["at"])
+
+    def test_yield_refusal_for_a_running_job_is_recorded(self):
+        self.comfy_up = True
+        self.queue_busy = True
+        self.assertFalse(gs.yield_to_pipeline()["yielded"])
+        self.assertEqual(gs.get_last_guard_event()["action"], "refused")
+        self.assertEqual(self.calls, [])
+
     def test_end_and_touch(self):
         self.assertFalse(gs.touch("x"))
         self.begin()

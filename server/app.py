@@ -118,6 +118,17 @@ def _comfy_extra_status():
     }
 
 
+def _last_guard_event():
+    """The last pipeline GPU guard stop/refusal, or None. Resolved lazily so app.py imports even if gpu_session lacks it."""
+    fn = getattr(gpu_session, "get_last_guard_event", None)
+    if not callable(fn):
+        return None
+    try:
+        return fn()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 @app.route("/api/comfy/status")
 def comfy_status():
     try:
@@ -128,12 +139,14 @@ def comfy_status():
             "vram_free": dev.get("vram_free"),
             "vram_total": dev.get("vram_total"),
             "checkpoints": list_models(),
+            "last_guard_event": _last_guard_event(),
             **_comfy_extra_status(),
         })
     except Exception as exc:  # noqa: BLE001
         return jsonify({
             "up": False, "error": str(exc), "checkpoints": [],
             "log_tail": _comfy_log_tail(),
+            "last_guard_event": _last_guard_event(),
             **_comfy_extra_status(),
         })
 
@@ -209,8 +222,15 @@ def comfy_start():
         return jsonify({"started": bool(result.get("started")), "up": comfy_proc.comfy_up(),
                         **_comfy_extra_status()})
     except comfy_proc.ComfyUnavailable as exc:
-        return jsonify({"started": False, "up": False, "error": str(exc),
-                        "log_tail": _comfy_log_tail()}), 502
+        reason = str(getattr(exc, "reason", None) or exc)
+        tail = getattr(exc, "log_tail", None)
+        if isinstance(tail, str):
+            tail = tail.splitlines()
+        if not tail:
+            tail = _comfy_log_tail().splitlines()
+        log_tail = [str(x) for x in (tail or [])]
+        return jsonify({"ok": False, "reason": reason, "log_tail": log_tail,
+                        "started": False, "up": False, "error": str(exc)}), 502
 
 
 @app.route("/api/comfy/stop", methods=["POST"])
