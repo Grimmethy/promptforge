@@ -168,8 +168,12 @@ def run(store, pf, *, limit=0, requester=None, priority=None, dry_run=False, own
             return 1
         try:
             available = set(pf.models() or [])
-        except Exception:  # noqa: BLE001
-            available = set()
+        except Exception as exc:  # noqa: BLE001
+            reason = str(exc)[:300] or exc.__class__.__name__
+            out("could not list models from ComfyUI: %s" % reason)
+            if reasons is not None:
+                reasons.append("could not list models from ComfyUI: %s" % reason)
+            return 1
         beat()
         fails, last_requester = 0, None
         while True:
