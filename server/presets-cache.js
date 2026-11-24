@@ -18,9 +18,12 @@ async function statEntry(p) {
 
 // Signature over every source plus the direct entries of any source directory.
 async function computeSignature(sources) {
+  const statPromises = sources.map(src => statEntry(src));
+  const entries = await Promise.all(statPromises);
   const lines = [];
-  for (const src of sources) {
-    const entry = await statEntry(src);
+  for (let i = 0; i < sources.length; i++) {
+    const src = sources[i];
+    const entry = entries[i];
     lines.push(entry.line);
     if (entry.isDir) {
       const names = (await fs.promises.readdir(src)).sort();
