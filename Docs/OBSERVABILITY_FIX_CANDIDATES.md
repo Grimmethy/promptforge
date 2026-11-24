@@ -160,3 +160,49 @@ Replace the empty catch body with a single `console.error('loadGallery failed:',
 
 Benefits:
 Developers and operators now see a timestamped, context-labelled error in the browser console or Node stderr the moment a gallery load fails, eliminating the "blank gallery, no clue" debugging cycle. Rethrowing preserves the promise chain so any retry logic, error-boundary, or user-facing toast that keys off a rejected promise will actually fire. The fix is a two-line change scoped to one catch block, with no API or dependency surface added.
+
+### AC-8 · Silent swallow of `pf.models()` failures in job runner
+Strength: Strong
+Files: scripts/jobs/runner.py
+Snippet:
+```
+            return 1
+        try:
+            available = set(pf.models() or [])
+        except Exception:  # noqa: BLE001
+            available = set()
+        beat()
+        fails, last_requester = 0, None
+```
+
+Problem:
+The `except Exception:` block on the `pf.models()` call swallows all errors without logging or signaling. If model listing fails due to initialization issues, network problems, or API errors, the code silently continues with an empty model set. This is inconsistent with the preceding `pf.gpu_acquire()` error handling (lines 163-169) which logs failures and returns early. Operators have no visibility into why jobs might be failing or behaving unexpectedly when model availability is critical.
+
+Solution:
+Add logging and return early if model listing fails, consistent with the gpu_acquire block pattern. Use the existing `out()` function for output and append to the `reasons` list if available, then return 1 to signal failure. This ensures operators are notified of model listing failures and jobs don't proceed with an empty model set.
+
+Benefits:
+Operators will be immediately aware when model listing fails, enabling faster diagnosis and resolution. Jobs won't silently proceed with no available models, preventing downstream failures that are difficult to trace back to the root cause. The error handling is now consistent across both GPU acquisition and model listing operations.
+
+### AC-9 · Silent swallow in timing data collection lacks observability
+Strength: Strong
+Files: scripts/jobs/runner.py
+Snippet:
+```
+        if secs > 0:
+            try:
+                job_plan.append_timing(timings_path, {"model": rec["model"], "width": rec["width"], "height": rec["height"], "steps": rec["steps"], "seconds": secs})
+            except (ValueError, OSError):
+                pass
+        if deliver is not None:
+            try:
+```
+
+Problem:
+The `except (ValueError, OSError): pass` at line 266 silently swallows errors from `job_plan.append_timing()` with no logging, re-raise, or fallback. When the timings file becomes unwritable due to permission issues, disk exhaustion, or path invalidity, the code continues reporting success while losing all timing metadata. The adjacent `deliver()` block (lines 270-275) uses `# noqa: BLE001` to acknowledge its intentional swallow, but the timing block lacks this deliberation — suggesting the `pass` may have been added without the same consideration for observability.
+
+Solution:
+Replace the bare `pass` with a log statement using the project's existing `out()` primitive (visible at line 257), providing enough context to identify the problematic seed and error. This preserves the non-fatal behavior — the picture was already generated and the row recorded — while making timing write failures visible for debugging.
+
+Benefits:
+Systematic failures in timing data collection become detectable instead of silent. When timing data goes missing from `timings_path`, operators will have a log entry indicating which seed failed and why, rather than starting from zero context. The fix uses only the `out()` primitive already present in the file, requiring no new dependencies.
