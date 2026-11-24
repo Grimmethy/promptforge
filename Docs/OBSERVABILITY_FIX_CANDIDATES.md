@@ -206,3 +206,18 @@ Replace the bare `pass` with a log statement using the project's existing `out()
 
 Benefits:
 Systematic failures in timing data collection become detectable instead of silent. When timing data goes missing from `timings_path`, operators will have a log entry indicating which seed failed and why, rather than starting from zero context. The fix uses only the `out()` primitive already present in the file, requiring no new dependencies.
+
+### AC-10 · False Positive: Slot-fill error captured in manifest, not swallowed
+Strength: Strong
+Snippet:
+```
+                        rec = adapter.link(slug, role, tag, rnd, spec, gen.job, gen.name, gen.data)
+                        row = {"slug": slug, "role": role, "round": rnd, "tag": tag, "status": "linked", "file": (rec or {}).get("file"), "gallery": gen.name}
+                        fails = 0
+                    except (SlotFillError, OSError, ValueError) as exc:
+                        row = {"slug": slug, "role": role, "round": rnd, "status": "error", "error": str(exc)[:200]}
+                        fails += 1
+                        st["errors"] += 1
+```
+
+The `except` block at line 115 does not log or re-raise, but the caught exception is not being discarded: `str(exc)[:200]` is stored in `row["error"]`, the row's `status` is set to `"error"`, and the row is appended to the manifest via `_append(manifest, row)` at line 120. The error context therefore travels with the failure record and is visible to any downstream consumer of the manifest (dashboard, report, alerting). The scanner's heuristic correctly identified the absence of `logging.`, `raise`, or `print`, but the project's established pattern is manifest-based error capture rather than log-based, so this is a deliberate design choice, not a swallowed error.
