@@ -114,3 +114,26 @@ Replace the loop with a single `Promise.all` call that runs all 400 fetches conc
 
 Benefits:
 The total runtime drops from 13.3 minutes to ~2 seconds, freeing the event loop for other tasks and improving responsiveness. The fix is minimal, uses only existing primitives (`Promise.all`, `setTimeout`, `fetch`), and preserves ordering if needed — which it does, via reordering — without adding any new dependencies or APIs.
+
+### AC-6 · Serial filesystem stat calls in presets cache loop
+Strength: Strong
+Files: server/presets-cache.js
+Snippet:
+```
+// Signature over every source plus the direct entries of any source directory.
+async function computeSignature(sources) {
+  const lines = [];
+  for (const src of sources) {
+    const entry = await statEntry(src);
+    lines.push(entry.line);
+    if (entry.isDir) {
+```
+
+Problem:
+The `computeSignature` function performs `await statEntry(src)` sequentially inside a `for...of` loop over `sources`. Each `statEntry` call is an independent filesystem `stat` syscall with no data dependency on previous iterations. For N sources, this serializes N I/O operations that could run in parallel. On systems with 50-200+ preset files, this adds 5-100ms of unnecessary latency during cache initialization or invalidation, with the cost scaling linearly with the number of sources.
+
+Solution:
+Replace the sequential `for...of` loop with `Promise.all` over mapped `statEntry` calls to parallelize the independent filesystem I/O. Map each source to a `statEntry` promise, await all of them together, then iterate over the results in the original order to preserve the `lines` array construction and `isDir` branch logic. This uses only built-in `Promise.all` with no new dependencies.
+
+Benefits:
+Independent `stat` syscalls execute concurrently, reducing total I/O time from O(N * avg_latency) to O(max_latency). Cache initialization and invalidation become faster, especially with larger preset sets. The fix preserves exact behavioral semantics while eliminating the serialization bottleneck.
