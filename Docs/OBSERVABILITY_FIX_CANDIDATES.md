@@ -221,3 +221,26 @@ Snippet:
 ```
 
 The `except` block at line 115 does not log or re-raise, but the caught exception is not being discarded: `str(exc)[:200]` is stored in `row["error"]`, the row's `status` is set to `"error"`, and the row is appended to the manifest via `_append(manifest, row)` at line 120. The error context therefore travels with the failure record and is visible to any downstream consumer of the manifest (dashboard, report, alerting). The scanner's heuristic correctly identified the absence of `logging.`, `raise`, or `print`, but the project's established pattern is manifest-based error capture rather than log-based, so this is a deliberate design choice, not a swallowed error.
+
+### AC-11 · Surface gallery files missing from the disk-size total
+Strength: Strong
+Files: scripts/slot_fill/report.py
+Snippet:
+```
+    for r in linked:
+        try:
+            disk += os.path.getsize(os.path.join(gallery_dir, r.get("gallery") or ""))
+        except OSError:
+            pass
+    by_slug = {}
+    for r in linked:
+```
+
+Problem:
+The disk-size loop in the report builder calls `os.path.getsize` on each linked row's gallery file and, on `OSError`, executes a bare `pass`. A missing or unreadable gallery file contributes 0 bytes to `disk`, and nothing is recorded. The report then shows a disk figure that undercounts with no indication that any files were skipped. The `missing` list is initialized alongside `sheets`, but in the code shown it is never populated from the `miss` value returned by `contact_sheet`, so the only other signal for these files is not visibly connected to the report. A reader of the report cannot tell that the total is incomplete.
+
+Solution:
+In the `OSError` handler, log the skipped gallery path and the run's slug and role using the stdlib `logging` module, for example `logging.warning("slot_fill: cannot stat gallery %s for %s/%s: %s", path, slug, role, exc)`, and bind the exception with `as exc`. Keep the loop otherwise unchanged. Separately, append the `miss` entries returned by `contact_sheet` to `missing` so the missing-file information is actually carried forward. Do not add any metrics or new dependencies.
+
+Benefits:
+Gallery files that are absent or unreadable become visible in the logs with enough context to identify them, rather than silently reducing the reported disk total. Someone reading the report or the logs can tell when the size figure is incomplete and which run caused it.
