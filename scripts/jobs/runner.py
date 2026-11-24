@@ -263,8 +263,8 @@ def _run_job(store, pf, job, available, st, owner, deliver, timings_path, now, o
         if secs > 0:
             try:
                 job_plan.append_timing(timings_path, {"model": rec["model"], "width": rec["width"], "height": rec["height"], "steps": rec["steps"], "seconds": secs})
-            except (ValueError, OSError):
-                pass
+            except (ValueError, OSError) as exc:
+                out("%s seed %d: could not record timing to %s: %s: %s" % (rec["id"], seed, timings_path, exc.__class__.__name__, exc))
         if deliver is not None:
             try:
                 delivered = deliver(rec, seed, gen)
