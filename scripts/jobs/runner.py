@@ -10,9 +10,12 @@ import datetime
 import json
 import os
 import sys
+import logging
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "server"))
+
+logger = logging.getLogger(__name__)
 from core import job_plan  # noqa: E402
 
 from scripts.slot_fill import headroom  # noqa: E402
